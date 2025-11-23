@@ -116,11 +116,6 @@ jobs:
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
-        # 添加扫描优化
-        skip-dirs: |
-          .git
-          vendor
-          test
 
     - name: Upload Trivy scan results to GitHub Security
       uses: github/codeql-action/upload-sarif@v3

@@ -1,0 +1,14 @@
+mysql:
+  gatc:
+    service: gatc
+    database: claude_api
+    addr: 10.95.53.228:8307
+    user: dcdn_stat_r
+    password: rZGRPkVMu8ytm4V1
+    maxidleconns: 10
+    maxopenconns: 1000
+    connMaxLifeTime6: 90s
+    connTimeOut: 3s
+    writeTimeOut: 9500ms
+    readTimeOut: 9500ms
+    interpolateParams: "true"

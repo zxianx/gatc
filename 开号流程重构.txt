@@ -1,0 +1,127 @@
+我有重新了解了 登陆后的开好流程
+发现绑账单时独立的过程，只影响实际使用，不阻碍开启api服务 和 获取 apiKey
+所以绑账单可以放在最后一步， 和获取token的逻辑独立
+
+bilingStatus 保持
+	BillingStatusUnbound = 0
+	BillingStatusBound   = 1
+	BillingStatusDetach  = 2 // 绑定过，已解除
+
+ProjectStatus改成TokenStatus
+TokenStatusNone = 0
+TokenStatusCreateFail = 1
+TokenStatusGot = 2
+TokenStatusInvalid = 3 （外部强制设置的失效）
+
+项目可用变成  bilingStatus == BillingStatusBound &&  TokenStatus == TokenStatusGot
+
+项目废弃变成  bilingStatus == BillingStatusDetach || TokenStatus == TokenStatusInvalid
+
+
+
+开号流程变为
+
+GCPProjectExt struct {
+	 GCPProject
+   一些其他信息，比如绑的账单....  nil表示还未获取
+   Ext 为了一些信息可跨step用，避免重复代码
+}
+
+type PostLoginProcessCtx struct {
+	ctx *WorkCtx
+	cliProjectList []GCPProjectExt
+	dbProjectsMp     map[projectId]daoInstance
+	...
+	各step 通用的内容，可跨step用，避免重复代码
+}
+
+【代码风格】 直接包内函数，不要manager，直接   PostLoginProcessStep{n}{StepName}(PostLoginProcessCtx)
+
+step1，  获取  cliProjectList列表 （不用填扩展信息）， 补充到12， 若有补充 重新获取 cliProjectList ， 1次性获取emial下 dbProjectsMp  列表， 遍历cliProjectList， 对不在db列表中的行进行insert db， 若有插入db， 则重新获取db列表.  step1完成后 db中包含所有项目记录
+
+step2    遍历cliProjectList， 对db TokenStatus为None的项目执行 ， 开启4个服务， 生成token， 若OK， TokenStatus 变为GOT同时设置token字段。  否则设置TokenStatusCreateFail。  更新到dbProjectsMp，将更新写入db
+
+step3  
+3.1 cli获取所有绑账单的项目（这里我不清楚是要先获取项目在逐个判断是否绑账单了 还是能直接获取所有绑了账单的项目） 
+3.2 若绑账单项目对应db状态是未绑定，更新dbProjectsMp中行的绑定状态，将更新写入db（不一致了，需要同步绑卡项目的状态） 
+3.3 这个遍历过程要获取可用于绑定其他项目的账单
+
+step4 、 对Unbound的项目  ，依次检查尝试绑定账单，（这里不设置绑定失败状态），绑定OK的项目更新dbProjectsMp，写入db
+
+step5、（后置token数据同步， 和前四步独立） 获取当前account表   bilingStatus == BillingStatusBound &&  TokenStatus == TokenStatusGot 的记录 作为集合1，
+ 获取所有 official_tokens 表 email 等于当前email的行的 projectId， 作为集合2
+ 在集合1不在集合2的记录（新获取的token），写入 official_tokens表 （insert sql见下文）
+
+
+
+
+附录，
+【开启服务】
+各项目每个都开启4个服务（可重复执行）
+  "cloudresourcemanager.googleapis.com"
+  "serviceusage.googleapis.com"
+  "apikeys.googleapis.com"
+  "generativelanguage.googleapis.com"
+示例
+ gcloud services enable  "apikeys.googleapis.com"   --project="gatc-project-1763804098-1"
+
+【获取gemini token1的实测命令】
+获取key， 输出的 gjson 路径 response.keyString 获取到keyString
+gatc@gatc-vm-20251122175638:~$   gcloud services api-keys create \
+        --project="gatc-project-1763804098-2" \
+        --display-name="Gemini API Key" \
+        --api-target=service=generativelanguage.googleapis.com \
+        --format=json 2>/dev/null
+{
+  "done": true,
+  "name": "operations/akmf.p7-975091800952-c751827a-ed20-41fc-881f-89a83ca68bcf",
+  "response": {
+    "@type": "type.googleapis.com/google.api.apikeys.v2.Key",
+    "createTime": "2025-11-22T19:15:56.693879Z",
+    "displayName": "Gemini API Key",
+    "etag": "W/\"4mlA/GjSjHgIjAjhyhLTbA==\"",
+    "keyString": "AIzaSyCbUIem2O430MrMgCFRRIIxUQtaK5HxJ7I",
+    "name": "projects/975091800952/locations/global/keys/0af2e4fa-8440-4264-8714-08e9e9e23b55",
+    "restrictions": {
+      "apiTargets": [
+        {
+          "service": "generativelanguage.googleapis.com"
+        }
+      ]
+    },
+    "uid": "0af2e4fa-8440-4264-8714-08e9e9e23b55",
+    "updateTime": "2025-11-22T19:15:56.717265Z"
+  }
+}
+【insert official_tokens】
+INSERT INTO `official_tokens` (
+    `channel_id`,
+    `name`,
+    `token`,
+    `proxy`,
+    `priority`,
+    `weight`,
+    `rpm_limit`,
+    `tpm_limit`,
+    `status`,
+    `token_type`,
+    `email`,
+    `project_id`,
+    `created_at`,
+    `updated_at`
+) VALUES (
+    16,                           -- channel_id， 固定16
+    'gatc',                       -- name， 固定
+    '', 													-- token
+    '', 													-- proxy  vm socket5 地址
+    50,                           -- priority
+    100,                          -- weight
+    0,                            -- rpm_limit 0
+    0,                            -- tpm_limit 0
+    1,                            -- status
+    'static',                     -- token_type
+    '123.com',                    -- email
+    'project_id',                 -- project_id
+    '2025-10-22 15:54:06.471',    -- created_at
+    '2025-11-22 18:32:46.002'     -- updated_at
+);

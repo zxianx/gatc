@@ -22,7 +22,6 @@ func LoadAppConfig(path string) {
 	if err != nil {
 
 		panic(fmt.Sprintf("LoadConfig read config file error: %v", err))
-		return
 	}
 	err = yaml.Unmarshal(content, &AppConf)
 

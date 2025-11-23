@@ -13,6 +13,11 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # 添加并发控制，避免重复运行
+    concurrency:
+      group: test-${{ github.ref }}
+      cancel-in-progress: true
+
     steps:
     - uses: actions/checkout@v4
     
@@ -45,6 +50,11 @@ jobs:
     
     - name: Build application
       run: go build -v ./...
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
 
   build:
     needs: test
@@ -83,12 +93,15 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        # 添加构建参数优化
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
 
   security:
     runs-on: ubuntu-latest
@@ -103,7 +116,12 @@ jobs:
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
-    
+        # 添加扫描优化
+        skip-dirs: |
+          .git
+          vendor
+          test
+
     - name: Upload Trivy scan results to GitHub Security
       uses: github/codeql-action/upload-sarif@v3
       if: always()

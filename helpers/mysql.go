@@ -42,6 +42,8 @@ func initMysqlClient(conf conf.MysqlConf) (client *gorm.DB, err error) {
 		)
 	}
 
+	fmt.Println(dsn)
+
 	c := &gorm.Config{
 		SkipDefaultTransaction: true,
 		NamingStrategy:         nil,

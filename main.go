@@ -10,6 +10,7 @@ import (
 	"gatc/handler"
 	"gatc/helpers"
 	"strconv"
+	"time"
 
 	"gatc/env"
 	"github.com/gin-gonic/gin"
@@ -65,6 +66,15 @@ func main() {
 }
 
 func setupRoutes(r *gin.Engine) {
+	// 健康检查路由
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status": "healthy",
+			"service": "gatc",
+			"timestamp": time.Now().Unix(),
+		})
+	})
+	
 	// VM管理路由
 	vmHandler := handler.NewVMHandler()
 	// 账户管理路由

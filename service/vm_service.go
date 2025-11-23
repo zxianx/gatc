@@ -25,6 +25,7 @@ import (
 type CreateVMParam struct {
 	Zone        string `json:"zone,omitempty"`
 	MachineType string `json:"machine_type,omitempty"`
+	Tag         string `json:"tag,omitempty"`
 }
 
 // CreateVMResult 创建VM返回结果
@@ -191,7 +192,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	}
 
 	projectID := gcpConfig.GetProjectID()
-	vmName := fmt.Sprintf("gatc-vm-%s", time.Now().Format("20060102150405"))
+	vmName := fmt.Sprintf("gatc-vm-%s%s", param.Tag, time.Now().Format("20060102150405"))
 
 	// 使用SSH公钥作为metadata
 	sshKeyMetadata := fmt.Sprintf("gatc:%s", strings.TrimSpace(gcpConfig.GetSSHPubKeyContent()))

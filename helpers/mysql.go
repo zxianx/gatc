@@ -25,18 +25,22 @@ func InitMysql() {
 }
 
 func initMysqlClient(conf conf.MysqlConf) (client *gorm.DB, err error) {
-
-	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=True&loc=Asia%%2FShanghai&interpolateParams=%s&charset=utf8",
-		conf.User,
-		conf.Password,
-		conf.Addr,
-		conf.DataBase,
-		conf.ConnTimeOut,
-		conf.ReadTimeOut,
-		conf.WriteTimeOut,
-		conf.InterpolateParams,
-	)
+	dsn := ""
+	if conf.Dsn != "" {
+		dsn = conf.Dsn
+	} else {
+		dsn = fmt.Sprintf(
+			"%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=True&loc=Asia%%2FShanghai&interpolateParams=%s&charset=utf8mb4",
+			conf.User,
+			conf.Password,
+			conf.Addr,
+			conf.DataBase,
+			conf.ConnTimeOut,
+			conf.ReadTimeOut,
+			conf.WriteTimeOut,
+			conf.InterpolateParams, //false
+		)
+	}
 
 	c := &gorm.Config{
 		SkipDefaultTransaction: true,

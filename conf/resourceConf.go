@@ -21,6 +21,7 @@ type MysqlConf struct {
 	WriteTimeOut      time.Duration `yaml:"writeTimeOut"`
 	ReadTimeOut       time.Duration `yaml:"readTimeOut"`
 	InterpolateParams string        `yaml:"interpolateParams"`
+	Dsn               string        `yaml:"dsn"`
 }
 
 var MysqlConfs map[string]MysqlConf

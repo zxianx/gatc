@@ -2,20 +2,19 @@ version: '3.8'
 
 services:
   gatc:
-    image: ghcr.io/your-repo/gatc:latest  # 替换为实际的镜像地址
+    container_name: gatc
+    image: ghcr.io/zxianx/gatc:latest
     ports:
-      - "5401:5401"
+      - "8401:5401"
     environment:
       - DEV_LOCAL_ENV=false
     volumes:
-      # Mount configuration from host /opt/gatc/conf
       - /opt/gatc/conf:/app/conf:ro
-    depends_on:
-      mysql:
-        condition: service_healthy
     restart: unless-stopped
     networks:
-      - gatc-network
+      gatc-network:
+        aliases:
+          - gatc-service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5401/health"]
       interval: 30s
@@ -27,32 +26,17 @@ services:
       options:
         max-size: "100m"
         max-file: "3"
-
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: gatc_root_password
-      MYSQL_DATABASE: gatc
-      MYSQL_USER: gatc_user
-      MYSQL_PASSWORD: gatc_password
-    volumes:
-      - /opt/gatc/mysql:/var/lib/mysql
-    ports:
-      - "127.0.0.1:3306:3306"  # 仅本地访问
-    restart: unless-stopped
-    networks:
-      - gatc-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "gatc_user", "-pgatc_password"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
+    # 可选：添加资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
 
 networks:
   gatc-network:
     driver: bridge
+    name: gatc-network

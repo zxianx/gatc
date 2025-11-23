@@ -30,14 +30,21 @@ apt-get install -y dante-server
 INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
 echo "Using network interface: $INTERFACE"
 
+sysctl -w net.core.rmem_max=16777216
+sysctl -w net.core.wmem_max=16777216
+sysctl -w net.ipv4.tcp_rmem="4096 87380 16777216"
+sysctl -w net.ipv4.tcp_wmem="4096 65536 16777216"
+
 cat > /etc/danted.conf <<EOF
-logoutput: syslog
+logoutput: /dev/null
 internal: 0.0.0.0 port = 1080
 external: $INTERFACE
 clientmethod: none
 socksmethod: none
 user.privileged: root
 user.unprivileged: nobody
+sockbufsize: 65536
+maxclients: 100
 
 client pass {
     from: 0.0.0.0/0 to: 0.0.0.0/0

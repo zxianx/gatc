@@ -26,7 +26,8 @@ func InitMysql() {
 
 func initMysqlClient(conf conf.MysqlConf) (client *gorm.DB, err error) {
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=True&loc=Asia%%2FShanghai&interpolateParams=%s&charset=utf8&allowOldPasswords=true&allowNativePasswords=true",
+	dsn := fmt.Sprintf(
+		"%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=True&loc=Asia%%2FShanghai&interpolateParams=%s&charset=utf8",
 		conf.User,
 		conf.Password,
 		conf.Addr,

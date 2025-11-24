@@ -84,7 +84,9 @@ func (s *GcpAccountService) StartAccountRegistration(c *gin.Context, param *Star
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("查询账户状态失败: %v", err)
 		}
-		vmId = account.VMID
+		if account != nil {
+			vmId = account.VMID
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) || vmId == "" {
 			// 账户记录不存在或没有关联VM，需要创建新VM
 			needCreateVm = true

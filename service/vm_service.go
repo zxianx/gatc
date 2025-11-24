@@ -200,7 +200,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	cmdStr := fmt.Sprintf("gcloud compute instances create %s "+
 		"--project=%s --zone=%s --machine-type=%s --network-tier=STANDARD --maintenance-policy=MIGRATE "+
 		"--image-family=debian-12 --image-project=debian-cloud "+
-		"--boot-disk-size=10GB --boot-disk-type=pd-standard "+
+		"--boot-disk-type=pd-standard "+
 		"--metadata=ssh-keys='%s' "+
 		"--metadata-from-file=startup-script=%s "+
 		"--tags=http-server,https-server --format=json",
@@ -214,7 +214,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		return nil, fmt.Errorf("failed to create VM: %v, stderr: %s", err, stderr)
 	}
 
-	zlog.InfoWithCtx(c, "VM creation command completed", "stdout", stdout)
+	zlog.InfoWithCtx(c, "VM creation command completed", "stdout", stdout, "stderr", stderr)
 
 	// 等待VM启动并重试获取外网IP
 	externalIP := "pending"

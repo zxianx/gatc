@@ -21,5 +21,5 @@
 打包配置
 tar -czf ./output/config.tar.gz ./conf/gcp ./conf/*.yaml
 到38 /opt/gatc  rz ， tar -xvf
-
+sudo  chmod -R 777 ./conf
 sudo docker compose -f docker-compose.prod.yml up -d

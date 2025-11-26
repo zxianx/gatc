@@ -100,6 +100,7 @@ func setupRoutes(r *gin.Engine) {
 			account.GET("/list", accountHandler.ListAccounts)
 			account.GET("/process-projects-v2", accountHandler.ProcessProjectsV2)                     // 项目处理流程V2（新的5步流程），参数：email
 			account.GET("/process-projects-v3", accountHandler.ProcessProjectsV3)                     // 项目处理流程V2（新的5步流程），参数：email
+			account.GET("/process-projects", accountHandler.ProcessProjectsV3)                        // 项目处理流程V2（新的5步流程），参数：email
 			account.POST("/set-token-invalid", accountHandler.SetTokenInvalid)                        // 设置token失效，参数：id 或 email+project_id
 			account.GET("/set-token-invalid", accountHandler.SetTokenInvalid)                         // 设置token失效，支持GET请求
 			account.GET("/emails-with-unbound-projects", accountHandler.GetEmailsWithUnboundProjects) // 获取包含未绑账单项目的邮箱列表

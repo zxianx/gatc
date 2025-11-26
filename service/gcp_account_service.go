@@ -449,8 +449,8 @@ func (s *GcpAccountService) updateAccountVMInfo(c *gin.Context, email string, ne
 		return fmt.Errorf("email或VM实例为空")
 	}
 
-	// 构造新的sock5代理地址
-	newSock5Proxy := fmt.Sprintf("%s:%d", newVMInstance.ExternalIP, newVMInstance.ProxyPort)
+	// 使用新的代理地址（包含用户名密码）
+	newSock5Proxy := newVMInstance.Proxy
 
 	zlog.InfoWithCtx(c, "开始更新账户VM信息", "email", email, "newVmId", newVMInstance.VMID, "newSock5Proxy", newSock5Proxy)
 

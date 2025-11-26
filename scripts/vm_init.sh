@@ -35,12 +35,25 @@ apt-get install -y dante-server
 INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
 echo "Using network interface: $INTERFACE"
 
+# 从metadata获取代理用户名和密码
+echo "Getting proxy credentials from metadata..."
+PROXY_USERNAME=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/proxy-username || echo "gatcuser")
+PROXY_PASSWORD=$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/proxy-password || echo "gatcpass123")
+
+echo "Proxy username: $PROXY_USERNAME"
+echo "Proxy password configured"
+
+# 创建系统用户用于SOCKS5认证
+useradd -M -r -s /usr/sbin/nologin "$PROXY_USERNAME" 2>/dev/null || true
+echo "$PROXY_USERNAME:$PROXY_PASSWORD" | chpasswd || true
+
+# clientmethod: none  不需要让客户端连接时就做 PAM 认证
 cat > /etc/danted.conf <<EOF
-logoutput: /dev/null
+logoutput: /var/log/danted.log
 internal: 0.0.0.0 port = 1080
-external: ens4
+external: $INTERFACE
 clientmethod: none
-socksmethod: none
+socksmethod: username
 user.privileged: root
 user.unprivileged: nobody
 
@@ -64,8 +77,27 @@ sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 16777216"
 sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 16777216"
 echo "Set sys param d"
 
+
+cat > /etc/systemd/system/danted.service <<EOF
+[Unit]
+Description=SOCKS5 Proxy (Dante)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/sbin/danted -f /etc/danted.conf
+Restart=always
+RestartSec=5
+User=root
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # 启动SOCKS5代理服务
 echo "Starting SOCKS5 proxy service..."
+systemctl daemon-reload
 systemctl enable danted
 systemctl restart danted
 

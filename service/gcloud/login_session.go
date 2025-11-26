@@ -137,13 +137,13 @@ func (as *AuthSession) DoLogin() (loginUrl string, err error) {
 		zlog.ErrorWithCtx(as.Ctx.GinCtx, "SSH命令启动失败", err)
 		return "", err
 	}
-	
+
 	zlog.InfoWithCtx(as.Ctx.GinCtx, "SSH命令已启动，进程ID:", as.SSHCmd.Process.Pid)
 
 	// 启动合并的输出读取器 (stdout + stderr)
 	zlog.InfoWithCtx(as.Ctx.GinCtx, "启动合并输出读取器")
 	go as.readCombinedOutput(as.stdout, as.stderr)
-	
+
 	// 短暂等待，确保读取器已启动
 	time.Sleep(100 * time.Millisecond)
 	zlog.InfoWithCtx(as.Ctx.GinCtx, "开始监听命令输出...")
@@ -159,16 +159,16 @@ func (as *AuthSession) DoLogin() (loginUrl string, err error) {
 				zlog.ErrorWithCtx(as.Ctx.GinCtx, "输出通道意外关闭", nil)
 				return "", errors.New("命令输出异常结束")
 			}
-			
+
 			// 去掉换行符进行处理
 			line = strings.TrimSpace(line)
 			if line != "" {
 				zlog.InfoWithCtx(as.Ctx.GinCtx, "[LOGIN STDOUT] "+line)
 			}
-			
+
 			// 检查是否需要确认继续（现在来自stderr）
-			if strings.Contains(line, "Do you want to continue (Y/n)?") || 
-			   strings.Contains(line, "(Y/n)?") {
+			if strings.Contains(line, "Do you want to continue (Y/n)?") ||
+				strings.Contains(line, "(Y/n)?") {
 				zlog.InfoWithCtx(as.Ctx.GinCtx, "检测到确认提示，发送 Y", "来源", line)
 				select {
 				case as.inputCh <- "Y\n":
@@ -178,7 +178,7 @@ func (as *AuthSession) DoLogin() (loginUrl string, err error) {
 				}
 				continue
 			}
-			
+
 			// 查找登录URL（通常来自stdout）
 			if strings.Contains(line, "https://accounts.google.com/o/oauth2/auth") {
 				// 提取URL - 先移除前缀
@@ -188,7 +188,7 @@ func (as *AuthSession) DoLogin() (loginUrl string, err error) {
 				} else if strings.HasPrefix(line, "[STDERR] ") {
 					cleanLine = strings.TrimPrefix(line, "[STDERR] ")
 				}
-				
+
 				parts := strings.Fields(cleanLine)
 				for _, part := range parts {
 					if strings.HasPrefix(part, "https://accounts.google.com/o/oauth2/auth") {
@@ -265,19 +265,19 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 	}()
 
 	zlog.InfoWithCtx(as.Ctx.GinCtx, "readCombinedOutput 开始读取")
-	
+
 	// 启动两个goroutine分别读取stdout和stderr
 	combinedCh := make(chan string, 100)
-	
+
 	// 读取stdout
 	go func() {
 		defer func() {
 			zlog.InfoWithCtx(as.Ctx.GinCtx, "stdout读取器结束")
 		}()
-		
+
 		buffer := make([]byte, 1)
 		var accumulator strings.Builder
-		
+
 		for {
 			select {
 			case <-as.DeadlineCtx.Done():
@@ -295,11 +295,11 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 					}
 					return
 				}
-				
+
 				if n > 0 {
 					char := string(buffer[:n])
 					accumulator.WriteString(char)
-					
+
 					// 遇到换行符发送整行
 					if char == "\n" {
 						combinedCh <- "[STDOUT] " + accumulator.String()
@@ -309,16 +309,16 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 			}
 		}
 	}()
-	
+
 	// 读取stderr
 	go func() {
 		defer func() {
 			zlog.InfoWithCtx(as.Ctx.GinCtx, "stderr读取器结束")
 		}()
-		
+
 		buffer := make([]byte, 1)
 		var accumulator strings.Builder
-		
+
 		for {
 			select {
 			case <-as.DeadlineCtx.Done():
@@ -336,11 +336,11 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 					}
 					return
 				}
-				
+
 				if n > 0 {
 					char := string(buffer[:n])
 					accumulator.WriteString(char)
-					
+
 					// 检查是否遇到换行符或特殊提示
 					if char == "\n" {
 						combinedCh <- "[STDERR] " + accumulator.String()
@@ -358,7 +358,7 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 			}
 		}
 	}()
-	
+
 	// 统一处理合并后的输出
 	for {
 		select {
@@ -369,9 +369,9 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 			if !ok {
 				return
 			}
-			
+
 			zlog.InfoWithCtx(as.Ctx.GinCtx, "合并输出", "内容", line)
-			
+
 			// 发送到主通道
 			select {
 			case as.outputCh <- line:
@@ -382,64 +382,6 @@ func (as *AuthSession) readCombinedOutput(stdout, stderr io.ReadCloser) {
 	}
 }
 
-
-//func (as *AuthSession) readPipeInterval( r io.ReadCloser) {
-//	defer close(as.outputCh)
-//
-//	buf := make([]byte, 4096)
-//	var pending bytes.Buffer
-//
-//	ticker := time.NewTicker(100 * time.Millisecond)
-//	defer ticker.Stop()
-//
-//	for {
-//		select {
-//		case <-as.DeadlineCtx.Done():
-//			return
-//		default:
-//		}
-//
-//		// 尝试尽可能多读（管道无数据会立即返回 n=0,nil != EOF）
-//		for {
-//			r.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
-//
-//			n, err := r.Read(buf)
-//			if n > 0 {
-//				pending.Write(buf[:n])
-//			}
-//
-//			if err != nil {
-//				if errors.Is(err, os.ErrDeadlineExceeded) {
-//					// 当前没有更多数据可读，跳出 read 循环
-//					break
-//				}
-//				if err == io.EOF {
-//					// 完结，输出剩余部分
-//					if pending.Len() > 0 {
-//						as.splitAndSend(&pending)
-//					}
-//					return
-//				}
-//				// 其他错误，退出
-//				return
-//			}
-//
-//			// 若 n < len(buf)，说明暂时读完了
-//			if n < len(buf) {
-//				break
-//			}
-//		}
-//
-//		// 每 100ms 处理一次已读取的数据
-//		select {
-//		case <-ticker.C:
-//			as.splitAndSend(&pending)
-//		default:
-//		}
-//	}
-//}
-
-
 // 统一写入 stdin
 func (as *AuthSession) startInputWriter() {
 	go func() {
@@ -448,7 +390,7 @@ func (as *AuthSession) startInputWriter() {
 				as.stdin.Close()
 			}
 		}()
-		
+
 		for {
 			select {
 			case v, ok := <-as.inputCh:

@@ -11,6 +11,7 @@ import (
 	"gatc/constants"
 	"gatc/dao"
 	"gatc/tool"
+	mrand "math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ type CreateVMResult struct {
 	VMID          string `json:"vm_id"`
 	VMName        string `json:"vm_name"`
 	ExternalIP    string `json:"external_ip"`
-	ProxyPort     int    `json:"proxy_port"`
+	Proxy         string `json:"proxy"`
 	SSHConnection string `json:"ssh_connection"`
 }
 
@@ -88,6 +89,59 @@ type RefreshVMIPResult struct {
 type VMService struct{}
 
 var GVmService = &VMService{}
+
+// generateRandomString 生成指定长度的随机字符串
+func generateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[mrand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+// generateProxyCredentials 生成SOCKS5代理的用户名和密码
+func generateProxyCredentials() (string, string) {
+	username := "gatc" + generateRandomString(6)
+	password := generateRandomString(12)
+	return username, password
+}
+
+// validateVMTag 验证VM标签是否符合GCP命名规范
+func validateVMTag(tag string) error {
+	if tag == "" {
+		return nil
+	}
+
+	// GCP VM名称规范：
+	// 1. 只能包含小写字母、数字和连字符
+	// 2. 必须以小写字母开头
+	// 3. 不能以连字符结尾
+	// 4. 长度1-63个字符
+
+	if len(tag) > 50 { // 预留空间给vm前缀和时间戳
+		return fmt.Errorf("tag长度不能超过50个字符，当前长度：%d", len(tag))
+	}
+
+	// 检查是否只包含允许的字符
+	for _, r := range tag {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return fmt.Errorf("tag只能包含小写字母、数字和连字符，发现无效字符：%c", r)
+		}
+	}
+
+	// 检查是否以小写字母开头
+	if tag[0] < 'a' || tag[0] > 'z' {
+		return fmt.Errorf("tag必须以小写字母开头")
+	}
+
+	// 检查是否以连字符结尾
+	if tag[len(tag)-1] == '-' {
+		return fmt.Errorf("tag不能以连字符结尾")
+	}
+
+	return nil
+}
 
 func (s *VMService) EnsureSSHKeys() error {
 	privateKeyPath := constants.SSHKeyPath
@@ -166,6 +220,12 @@ func (s *VMService) activateServiceAccount(c *gin.Context) error {
 }
 
 func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMResult, error) {
+	// 验证tag参数
+	if err := validateVMTag(param.Tag); err != nil {
+		zlog.ErrorWithCtx(c, "VM tag validation failed", err)
+		return nil, fmt.Errorf("标签验证失败: %v", err)
+	}
+
 	zone := constants.DefaultZone
 	if param.Zone != "" {
 		zone = param.Zone
@@ -192,7 +252,10 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	}
 
 	projectID := gcpConfig.GetProjectID()
-	vmName := fmt.Sprintf("gatc-vm-%s%s", param.Tag, time.Now().Format("20060102150405"))
+	vmName := fmt.Sprintf("gatc-vm-%s-%s", param.Tag, time.Now().Format("20060102150405"))
+
+	// 生成SOCKS5代理的用户名和密码
+	proxyUsername, proxyPassword := generateProxyCredentials()
 
 	// 使用SSH公钥作为metadata
 	sshKeyMetadata := fmt.Sprintf("gatc:%s", strings.TrimSpace(gcpConfig.GetSSHPubKeyContent()))
@@ -201,10 +264,10 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		"--project=%s --zone=%s --machine-type=%s --network-tier=STANDARD --maintenance-policy=MIGRATE "+
 		"--image-family=debian-12 --image-project=debian-cloud "+
 		"--boot-disk-type=pd-standard "+
-		"--metadata=ssh-keys='%s' "+
+		"--metadata=ssh-keys='%s',proxy-username='%s',proxy-password='%s' "+
 		"--metadata-from-file=startup-script=%s "+
 		"--tags=http-server,https-server --format=json",
-		vmName, projectID, zone, machineType, sshKeyMetadata, constants.VMInitScriptPath)
+		vmName, projectID, zone, machineType, sshKeyMetadata, proxyUsername, proxyPassword, constants.VMInitScriptPath)
 
 	zlog.InfoWithCtx(c, "Executing gcloud command to create VM", "command", cmdStr)
 
@@ -237,13 +300,16 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		zlog.InfoWithCtx(c, "Failed to get external IP after all retries, VM created but IP is pending")
 	}
 
+	// 使用已生成的代理用户名和密码构建完整代理地址
+	proxyAuth := fmt.Sprintf("%s:%s@%s:1080", proxyUsername, proxyPassword, externalIP)
+
 	vmInstance := &dao.VMInstance{
 		VMID:          vmName,
 		VMName:        vmName,
 		Zone:          zone,
 		MachineType:   machineType,
 		ExternalIP:    externalIP,
-		ProxyPort:     1080,
+		Proxy:         proxyAuth,
 		SSHUser:       "gatc",
 		SSHKeyContent: gcpConfig.GetSSHKeyContent(),
 		Status:        constants.VMStatusRunning,
@@ -257,7 +323,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		VMID:          vmName,
 		VMName:        vmName,
 		ExternalIP:    externalIP,
-		ProxyPort:     1080,
+		Proxy:         proxyAuth,
 		SSHConnection: fmt.Sprintf("ssh gatc@%s", externalIP),
 	}, nil
 }

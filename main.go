@@ -69,12 +69,12 @@ func setupRoutes(r *gin.Engine) {
 	// 健康检查路由
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"status": "healthy",
-			"service": "gatc",
+			"status":    "healthy",
+			"service":   "gatc",
 			"timestamp": time.Now().Unix(),
 		})
 	})
-	
+
 	// VM管理路由
 	vmHandler := handler.NewVMHandler()
 	// 账户管理路由
@@ -99,6 +99,7 @@ func setupRoutes(r *gin.Engine) {
 			account.GET("/submit-auth-key", accountHandler.SubmitAuthKey) // 支持GET回调
 			account.GET("/list", accountHandler.ListAccounts)
 			account.GET("/process-projects-v2", accountHandler.ProcessProjectsV2)                     // 项目处理流程V2（新的5步流程），参数：email
+			account.GET("/process-projects-v3", accountHandler.ProcessProjectsV3)                     // 项目处理流程V2（新的5步流程），参数：email
 			account.POST("/set-token-invalid", accountHandler.SetTokenInvalid)                        // 设置token失效，参数：id 或 email+project_id
 			account.GET("/set-token-invalid", accountHandler.SetTokenInvalid)                         // 设置token失效，支持GET请求
 			account.GET("/emails-with-unbound-projects", accountHandler.GetEmailsWithUnboundProjects) // 获取包含未绑账单项目的邮箱列表

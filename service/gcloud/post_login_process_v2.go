@@ -8,7 +8,6 @@ import (
 	"gatc/dao"
 	"math/rand"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -36,21 +35,67 @@ type PostLoginProcessCtx struct {
 	CliProjectList  []GCPProjectExt            `json:"cli_project_list"` // CLI获取的项目列表
 	DbProjectsMp    map[string]*dao.GCPAccount `json:"db_projects_mp"`   // 数据库项目映射 projectId -> daoInstance
 	BillingAccounts []string                   `json:"billing_accounts"` // 可用的billing账户列表
+	Result          ProjectProcessResult       `json:"result"`           // V3新增：直接在上下文中设置结果
+	UnBindCurProj   bool                       `json:"un_bind_cur_proj"` // V3新增：是否解绑当前绑定的项目
 }
 
-// PostLoginProcessV2Result 处理结果
-type PostLoginProcessV2Result struct {
-	TotalProjects   int    `json:"total_projects"`   // 总项目数
-	CreatedProjects int    `json:"created_projects"` // 新创建的项目数
-	TokensCreated   int    `json:"tokens_created"`   // 创建的token数
-	BoundProjects   int    `json:"bound_projects"`   // 绑卡成功的项目数
-	SyncedTokens    int    `json:"synced_tokens"`    // 同步到official_tokens的token数
-	Message         string `json:"message"`          // 处理消息
+// ProcessPostLoginV3 执行V3的开号流程
+func ProcessPostLoginV3(ctx *PostLoginProcessCtx) error {
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "开始登录后处理流程V3", "邮箱", ctx.Ctx.Email)
+
+	// 初始化Result
+	ctx.Result = ProjectProcessResult{
+		Email:   ctx.Ctx.Email,
+		Success: false,
+	}
+
+	// Step1: 补全12个项目，同步DB（不含状态同步）
+	if err := PostLoginProcessStep1ProjectSetup(ctx); err != nil {
+		ctx.Result.Message = fmt.Sprintf("步骤1失败: %v", err)
+		return err
+	}
+
+	// Step2: 检查billing状态，若un_bind_cur_proj=true，解绑已绑账单的项目
+	if err := PostLoginProcessV3Step2BillingCheck(ctx); err != nil {
+		ctx.Result.Message = fmt.Sprintf("步骤2失败: %v", err)
+		return err
+	}
+
+	//Step3: 绑定billing account
+	if err := PostLoginProcessV3Step3BillingBind(ctx); err != nil {
+		ctx.Result.Message = fmt.Sprintf("步骤3失败: %v", err)
+		return err
+	}
+
+	// 指定项目，测试
+	//ctx.Result.BoundProjectsDetail = append(ctx.Result.BoundProjectsDetail, "gatc-project-1764167294-802509")
+	//ctx.Result.BoundProjects = 1
+
+	// Step4: 对新绑定billing的项目执行开token流程
+	if err := PostLoginProcessV3Step4TokenGeneration(ctx); err != nil {
+		ctx.Result.Message = fmt.Sprintf("步骤4失败: %v", err)
+		return err
+	}
+
+	// Step5: 后置official_tokens同步
+	_, err := PostLoginProcessStep5TokenSync(ctx)
+	if err != nil {
+		ctx.Result.Message = fmt.Sprintf("步骤5失败 PostLoginProcessStep5TokenSync: %v", err)
+		return err
+	}
+
+	ctx.Result.Success = true
+	ctx.Result.Message = fmt.Sprintf("V3流程完成: 项目 总计%d, 新增%d,  解绑%d，绑定%d, 提token%d，同步%d",
+		ctx.Result.TotalProjects, ctx.Result.CreatedProjects, ctx.Result.UnboundProjects,
+		ctx.Result.BoundProjects, ctx.Result.CreateTokens, ctx.Result.SyncedTokens)
+
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "登录后处理流程V3完成", "结果", ctx.Result.Message)
+	return nil
 }
 
 // ProcessPostLoginV2 执行新的5步处理流程
-func ProcessPostLoginV2(ctx *PostLoginProcessCtx) (*PostLoginProcessV2Result, error) {
-	result := &PostLoginProcessV2Result{}
+func ProcessPostLoginV2(ctx *PostLoginProcessCtx) (*ProjectProcessResult, error) {
+	result := &ProjectProcessResult{}
 
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "开始登录后处理流程V2", "邮箱", ctx.Ctx.Email)
 
@@ -59,14 +104,13 @@ func ProcessPostLoginV2(ctx *PostLoginProcessCtx) (*PostLoginProcessV2Result, er
 		return result, fmt.Errorf("流程1失败: %v", err)
 	}
 	result.TotalProjects = len(ctx.CliProjectList)
-	result.CreatedProjects = countCreatedProjects(ctx.CliProjectList) // 需要实现计数逻辑
 
 	// Step2: 开启API和生成token
 	tokenResults, err := PostLoginProcessStep2TokenGeneration(ctx)
 	if err != nil {
 		return result, fmt.Errorf("流程2失败: %v", err)
 	}
-	result.TokensCreated = tokenResults
+	result.CreateTokens = tokenResults
 
 	// Step3: 检查billing状态
 	if err := PostLoginProcessStep3BillingCheck(ctx); err != nil {
@@ -88,7 +132,7 @@ func ProcessPostLoginV2(ctx *PostLoginProcessCtx) (*PostLoginProcessV2Result, er
 	result.SyncedTokens = syncResults
 
 	result.Message = fmt.Sprintf("V2流程完成: 总计%d个项目, 新增%d个项目, 生成%d个Token, 绑卡%d个项目, 同步%d个官方Token",
-		result.TotalProjects, result.CreatedProjects, result.TokensCreated, result.BoundProjects, result.SyncedTokens)
+		result.TotalProjects, result.CreatedProjects, result.CreateTokens, result.BoundProjects, result.SyncedTokens)
 
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "登录后处理流程V2完成", "结果", result.Message)
 	return result, nil
@@ -120,6 +164,8 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 		if err != nil {
 			zlog.ErrorWithCtx(ctx.Ctx.GinCtx, "创建项目过程中有错误", err)
 		}
+		ctx.Result.CreatedProjects = createdCount
+		ctx.Result.CreatedProjectsDetail = createdProjects
 
 		// 添加创建的项目到列表
 		for _, projectID := range createdProjects {
@@ -129,21 +175,8 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 		}
 
 		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "项目创建完成", "新增", len(createdProjects), "总计", len(ctx.CliProjectList))
-
-		// 若有补充则重新获取cliProjectList, 没啥额外信息，前面已补充
-		//if len(createdProjects) > 0 {
-		//	updatedProjects, err := getCLIProjects(ctx.Ctx)
-		//	if err != nil {
-		//		zlog.ErrorWithCtx(ctx.Ctx.GinCtx, "重新获取项目列表失败", err)
-		//	} else {
-		//		ctx.CliProjectList = make([]GCPProjectExt, len(updatedProjects))
-		//		for i, p := range updatedProjects {
-		//			ctx.CliProjectList[i] = GCPProjectExt{GCPProject: p}
-		//		}
-		//		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "重新获取项目列表", "最终数量", len(ctx.CliProjectList))
-		//	}
-		//}
 	}
+	ctx.Result.TotalProjects = len(ctx.CliProjectList)
 
 	// 3. 1次性获取email下dbProjectsMp列表
 	if err := loadDBProjects(ctx); err != nil {
@@ -161,7 +194,7 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 				BillingStatus: dao.BillingStatusUnbound,
 				TokenStatus:   dao.TokenStatusNone,
 				VMID:          ctx.Ctx.VMInstance.VMID,
-				Sock5Proxy:    ctx.Ctx.VMInstance.ExternalIP + ":" + strconv.Itoa(ctx.Ctx.VMInstance.ProxyPort),
+				Sock5Proxy:    ctx.Ctx.VMInstance.Proxy,
 				Region:        "us-central1",
 				AuthStatus:    1,
 				CreatedAt:     time.Now(),
@@ -172,6 +205,8 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("创建项目记录失败 项目ID:%s", project.ProjectID), err)
 				continue
 			}
+			ctx.Result.SyncedProjects++
+			ctx.Result.SyncedProjectsDetail = append(ctx.Result.SyncedProjectsDetail, project.ProjectID)
 
 			zlog.InfoWithCtx(ctx.Ctx.GinCtx, "同步新项目到DB", "项目ID", project.ProjectID)
 			needDBReload = true
@@ -226,6 +261,44 @@ func PostLoginProcessStep2TokenGeneration(ctx *PostLoginProcessCtx) (int, error)
 
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "Step2完成", "成功生成Token", successCount)
 	return successCount, nil
+}
+
+// 仅开启新绑账单的项目
+func PostLoginProcessV3Step4TokenGeneration(ctx *PostLoginProcessCtx) error {
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行Token生成 ", "邮箱", ctx.Ctx.Email)
+
+	for _, project := range ctx.Result.BoundProjectsDetail {
+		dbProject := ctx.DbProjectsMp[project]
+		if dbProject == nil || dbProject.TokenStatus >= dao.TokenStatusGot {
+			zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行Token生成，项目跳过 ", "邮箱", ctx.Ctx.Email, "proj", project)
+			continue // 跳过不需要处理token的项目
+		}
+		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行Token生成，项目开始 ", "邮箱", ctx.Ctx.Email, "proj", project)
+
+		// 开启4个服务，生成token
+		success, token := generateTokenForProject(ctx.Ctx, project)
+		if success {
+			// TokenStatus变为GOT同时设置token字段
+			dbProject.TokenStatus = dao.TokenStatusGot
+			dbProject.OfficialToken = token
+			dbProject.UpdatedAt = time.Now()
+			ctx.Result.CreateTokens++
+		} else {
+			// 设置TokenStatusCreateFail
+			dbProject.TokenStatus = dao.TokenStatusCreateFail
+			dbProject.UpdatedAt = time.Now()
+		}
+
+		// 更新到dbProjectsMp，将更新写入db
+		if err := dao.GGcpAccountDao.Save(ctx.Ctx.GinCtx, dbProject); err != nil {
+			zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("更新项目Token状态失败 项目ID:%s", project), err)
+		} else {
+			zlog.InfoWithCtx(ctx.Ctx.GinCtx, "更新项目Token状态", "项目ID", project, "状态", dbProject.TokenStatus)
+		}
+	}
+
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "Step2完成", "成功生成Token", ctx.Result.CreateTokens)
+	return nil
 }
 
 // PostLoginProcessStep3BillingCheck Step3: 检查billing状态并同步
@@ -297,11 +370,6 @@ func loadDBProjects(ctx *PostLoginProcessCtx) error {
 	}
 
 	return nil
-}
-
-func countCreatedProjects(projects []GCPProjectExt) int {
-	// 简化实现，需要根据实际情况调整
-	return 0
 }
 
 func createProjects(workCtx *WorkCtx, count int) ([]string, error) {
@@ -407,6 +475,10 @@ func getBillingProjectsInfo(ctx *PostLoginProcessCtx) (map[string]string, []stri
 	// 遍历每个项目检查billing状态
 	for _, project := range ctx.CliProjectList {
 		projectID := project.ProjectID
+		dbProject := ctx.DbProjectsMp[projectID]
+		if dbProject != nil && dbProject.BillingStatus == dao.BillingStatusDetach {
+			continue
+		}
 
 		cmdd := fmt.Sprintf("gcloud billing projects describe %s --format='value(billingAccountName)' 2>/dev/null || echo ''", projectID)
 
@@ -460,6 +532,42 @@ func getBillingProjectsInfo(ctx *PostLoginProcessCtx) (map[string]string, []stri
 
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "获取billing信息完成", "绑定项目数", len(projects), "可用账户数", len(accounts))
 	return projects, accounts, nil
+}
+
+func PostLoginProcessV3Step3BillingBind(ctx *PostLoginProcessCtx) error {
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行Step3: Billing绑定", "邮箱", ctx.Ctx.Email)
+	if len(ctx.BillingAccounts) == 0 {
+		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "没有可用的billing账户，跳过绑定")
+		return nil
+	}
+	// 使用第一个可用的billing账户
+	billingAccount := ctx.BillingAccounts[0]
+	successCount := 0
+	// 对Unbound的项目，依次检查尝试绑定账单
+	for _, project := range ctx.CliProjectList {
+		dbProject := ctx.DbProjectsMp[project.ProjectID]
+		if dbProject == nil || dbProject.BillingStatus != dao.BillingStatusUnbound {
+			continue // 跳过已绑定或不存在的项目
+		}
+		// 尝试绑定账单
+		if bindProjectToBilling(ctx.Ctx, project.ProjectID, billingAccount) {
+			// 绑定OK的项目更新dbProjectsMp，写入db
+			dbProject.BillingStatus = dao.BillingStatusBound
+			dbProject.UpdatedAt = time.Now()
+
+			if err := dao.GGcpAccountDao.Save(ctx.Ctx.GinCtx, dbProject); err != nil {
+				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("更新项目Billing状态失败 项目ID:%s", project.ProjectID), err)
+			} else {
+				ctx.Result.BoundProjects++
+				ctx.Result.BoundProjectsDetail = append(ctx.Result.BoundProjectsDetail, project.ProjectID)
+				zlog.InfoWithCtx(ctx.Ctx.GinCtx, "项目绑定成功", "项目ID", project.ProjectID, "账户", billingAccount)
+			}
+		}
+		// 这里不设置绑定失败状态，按要求
+	}
+
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "Step4完成", "成功绑定", successCount)
+	return nil
 }
 
 // PostLoginProcessStep4BillingBind Step4: 对Unbound的项目，依次尝试绑定账单
@@ -528,8 +636,8 @@ func PostLoginProcessStep5TokenSync(ctx *PostLoginProcessCtx) (int, error) {
 	for _, project := range validProjects {
 		if !existingTokens[project.ProjectID] {
 			// 新token，需要同步
-			if err := insertOfficialToken(ctx.Ctx.GinCtx, ctx.Ctx.Email, project); err != nil {
-				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("插入official_token失败 项目ID:%s", project.ProjectID), err)
+			if err2 := insertOfficialToken(ctx.Ctx.GinCtx, ctx.Ctx.Email, project); err2 != nil {
+				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("插入official_token失败 项目ID:%s", project.ProjectID), err2)
 				continue
 			}
 			syncCount++
@@ -537,6 +645,7 @@ func PostLoginProcessStep5TokenSync(ctx *PostLoginProcessCtx) (int, error) {
 		}
 	}
 
+	ctx.Result.SyncedTokens = syncCount
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "Step5完成", "同步token数量", syncCount)
 	return syncCount, nil
 }
@@ -555,7 +664,8 @@ func bindProjectToBilling(workCtx *WorkCtx, projectID, billingAccount string) bo
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		zlog.ErrorWithCtx(workCtx.GinCtx, fmt.Sprintf("绑定billing失败 项目:%s 账户:%s output:%s", projectID, billingAccount, string(output)), err)
+		// 符合预期，不记录详细错误
+		zlog.InfoWithCtx(workCtx.GinCtx, fmt.Sprintf("绑定billing失败 项目:%s 账户:%s output:%s", projectID, billingAccount, string(output)), err)
 		return false
 	}
 
@@ -618,4 +728,76 @@ func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) error
 	}
 
 	return officialToken.Create(ginCtx.(*gin.Context))
+}
+
+// ====================== V3 新增函数 ======================
+
+func PostLoginProcessV3Step2BillingCheck(ctx *PostLoginProcessCtx) error {
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行V3 Step2: billing检查和解绑", "邮箱", ctx.Ctx.Email, "解绑模式", ctx.UnBindCurProj)
+
+	// 3.1 cli获取所有绑账单的项目
+	billingProjects, billingAccounts, err := getBillingProjectsInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("获取billing信息失败: %v", err)
+	}
+	ctx.Result.OldBindingProjects = len(billingProjects)
+
+	// 保存可用的billing账户
+	ctx.BillingAccounts = billingAccounts
+
+	if ctx.UnBindCurProj {
+		for projectID, _ := range billingProjects {
+			// do 解码
+			if err = unbindProjectBilling(ctx.Ctx, projectID); err != nil {
+				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, "解绑项目billing失败", err)
+				continue
+			}
+			ctx.Result.UnboundProjects++
+			ctx.Result.UnboundProjectsDetail = append(ctx.Result.UnboundProjectsDetail, projectID)
+
+			dbProject := ctx.DbProjectsMp[projectID]
+			if dbProject.BillingStatus != dao.BillingStatusDetach {
+				dbProject.BillingStatus = dao.BillingStatusDetach
+				dbProject.UpdatedAt = time.Now()
+				// 将更新写入db
+				if err := dao.GGcpAccountDao.Save(ctx.Ctx.GinCtx, dbProject); err != nil {
+					zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("更新项目Billing状态失败 项目ID:%s", projectID), err)
+				} else {
+					zlog.InfoWithCtx(ctx.Ctx.GinCtx, "更新项目Billing状态", "项目ID", projectID)
+				}
+			}
+		}
+	} else {
+		for projectID, billingAccount := range billingProjects {
+			dbProject := ctx.DbProjectsMp[projectID]
+			if dbProject.BillingStatus == dao.BillingStatusUnbound {
+				dbProject.BillingStatus = dao.BillingStatusBound
+				dbProject.UpdatedAt = time.Now()
+				// 将更新写入db
+				if err := dao.GGcpAccountDao.Save(ctx.Ctx.GinCtx, dbProject); err != nil {
+					zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("更新项目Billing状态失败 项目ID:%s", projectID), err)
+				} else {
+					zlog.InfoWithCtx(ctx.Ctx.GinCtx, "更新项目Billing状态", "项目ID", projectID, "账户", billingAccount)
+				}
+			}
+		}
+	}
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "V3 Step2完成", "发现billing账户", len(ctx.BillingAccounts))
+	return nil
+}
+
+// 解绑项目billing的函数
+func unbindProjectBilling(workCtx *WorkCtx, projectID string) error {
+	cmd := exec.Command("ssh", "-i", constants.SSHKeyPath, "-o", "StrictHostKeyChecking=no",
+		fmt.Sprintf("%s@%s", workCtx.VMInstance.SSHUser, workCtx.VMInstance.ExternalIP),
+		fmt.Sprintf("gcloud billing projects unlink %s", projectID),
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("解绑billing失败: %v, output: %s", err, string(output))
+	}
+
+	zlog.InfoWithCtx(workCtx.GinCtx, "解绑billing命令执行成功", "项目ID", projectID, "输出", string(output))
+	return nil
 }

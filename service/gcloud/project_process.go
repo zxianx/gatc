@@ -23,19 +23,27 @@ type ProjectProcessCtx struct {
 
 // ProjectProcessParam 项目处理参数
 type ProjectProcessParam struct {
-	Email string `json:"email" form:"email" binding:"required"`
+	Email                string `json:"email" form:"email" binding:"required"`
+	UnbindOldBillingProj *bool  `json:"unbind_old_billing_proj,omitempty"  form:"unbind_old_billing_proj,omitempty"`
 }
 
 // ProjectProcessResult 项目处理结果
 type ProjectProcessResult struct {
-	Email           string `json:"email"`
-	Success         bool   `json:"success"`
-	Message         string `json:"message"`
-	SyncedProjects  int    `json:"synced_projects"`  // 同步的项目数
-	CreatedProjects int    `json:"created_projects"` // 新创建的项目数
-	BoundProjects   int    `json:"bound_projects"`   // 绑卡成功的项目数
-	TokensCreated   int    `json:"tokens_created"`   // 创建的token数
-	TotalProjects   int    `json:"total_projects"`   // 总项目数
+	Email                 string   `json:"email"`
+	Success               bool     `json:"success"`
+	Message               string   `json:"message"`
+	SyncedProjects        int      `json:"synced_projects"` // 同步的项目数
+	SyncedProjectsDetail  []string `json:"synced_projects_detail"`
+	CreatedProjects       int      `json:"created_projects"` // 新创建的项目数
+	CreatedProjectsDetail []string `json:"created_projects_detail"`
+	OldBindingProjects    int      `json:"old_binding_projects"`
+	UnboundProjects       int      `json:"unbound_proj"`
+	UnboundProjectsDetail []string `json:"unbound_proj_detail"`
+	BoundProjects         int      `json:"bound_projects"` // 绑卡成功的项目数
+	BoundProjectsDetail   []string `json:"bound_projects_detail"`
+	CreateTokens          int      `json:"create_tokens"`
+	TotalProjects         int      `json:"total_projects"` // 总项目数
+	SyncedTokens          int      `json:"synced_tokens"`  // 同步到official_tokens的token数
 }
 
 // NewProjectProcessCtx 创建项目处理上下文

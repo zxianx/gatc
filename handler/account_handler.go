@@ -125,6 +125,22 @@ func (h *AccountHandler) ProcessProjectsV2(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *AccountHandler) ProcessProjectsV3(c *gin.Context) {
+	var param ProcessProjectsRequest
+	if err := c.ShouldBindQuery(&param); err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
+		return
+	}
+
+	result, err := h.projectService.ProcessProjectsV3(c, &param.ProjectProcessParam)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // SetTokenInvalidRequest token设置失效请求结构
 type SetTokenInvalidRequest struct {
 	service.SetTokenInvalidParam

@@ -46,23 +46,23 @@ func DebugWithCtx(c *gin.Context, msg string, fields ...interface{}) {
 
 func InfoWithCtx(c *gin.Context, msg string, fields ...interface{}) {
 	fields = appendRequestID(c, fields)
-	zlog.Infow(msg, fields...)
+	zlog.Info(msg, fields)
 }
 
 func WarnWithCtx(c *gin.Context, msg string, fields ...interface{}) {
 	fields = appendRequestID(c, fields)
-	zlog.Warnw(msg, fields...)
+	zlog.Warn(msg, fields)
 }
 
 func ErrorWithCtx(c *gin.Context, msg string, err error) {
 	fields := []interface{}{"error", err}
 	fields = appendRequestID(c, fields)
-	zlog.Errorw(msg, fields...)
+	zlog.Error(msg, fields)
 }
 
 func ErrorWithMsgAndCtx(c *gin.Context, msg string, fields ...interface{}) {
 	fields = appendRequestID(c, fields)
-	zlog.Errorw(msg, fields...)
+	zlog.Error(msg, fields)
 }
 
 // appendRequestID 添加requestId到日志字段中

@@ -6,13 +6,16 @@ import (
 	"gatc/base/middleware"
 	"gatc/base/zlog"
 	"gatc/conf"
+	"gatc/cron"
 	"gatc/dao"
 	"gatc/handler"
 	"gatc/helpers"
+	"gatc/service"
 	"strconv"
 	"time"
 
 	"gatc/env"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -49,6 +52,12 @@ func main() {
 		zlog.Error("Failed to initialize GCP config", err)
 		panic("Failed to initialize GCP config: " + err.Error())
 	}
+
+	// 初始化定时任务
+	cron.Init()
+	// 每小时清理24小时前的VM
+	cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs)
+	cron.Start()
 
 	r := gin.Default()
 

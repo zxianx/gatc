@@ -90,6 +90,76 @@ type VMService struct{}
 
 var GVmService = &VMService{}
 
+// CleanupOldVMs 清理24小时前创建的VM
+func (s *VMService) CleanupOldVMs() {
+	c := &gin.Context{}
+	zlog.InfoWithCtx(c, "Starting cleanup of old VMs")
+
+	// 获取24小时前创建的VM
+	cutoffTime := time.Now().Add(-24 * time.Hour)
+
+	vms, err := dao.GVmInstanceDao.GetVMsCreatedBefore(c, cutoffTime)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to get old VMs", err)
+		return
+	}
+
+	if len(vms) == 0 {
+		zlog.InfoWithCtx(c, "No old VMs to cleanup")
+		return
+	}
+
+	successCount := 0
+	for _, vm := range vms {
+		// 删除GCP中的VM实例
+		if err := s.deleteVMFromGCP(c, &vm); err != nil {
+			zlog.ErrorWithCtx(c, "Failed to delete VM from GCP", err)
+			continue
+		}
+
+		// 更新数据库状态
+		if err := dao.GVmInstanceDao.UpdateStatus(c, vm.VMID, constants.VMStatusDeleted); err != nil {
+			zlog.ErrorWithCtx(c, "Failed to update VM status", err)
+			continue
+		}
+
+		successCount++
+		zlog.InfoWithCtx(c, "Deleted old VM")
+	}
+
+	zlog.InfoWithCtx(c, "Cleanup of old VMs completed")
+}
+
+// deleteVMFromGCP 从GCP中删除VM实例
+func (s *VMService) deleteVMFromGCP(c *gin.Context, vm *dao.VMInstance) error {
+	// 激活服务账户
+	if err := s.activateServiceAccount(c); err != nil {
+		return fmt.Errorf("failed to activate service account: %v", err)
+	}
+
+	gcpConfig := config.GetGCPConfig()
+	projectID := gcpConfig.GetProjectID()
+
+	cmdStr := fmt.Sprintf("gcloud compute instances delete %s "+
+		"--project=%s --zone=%s --quiet", vm.VMID, projectID, vm.Zone)
+
+	zlog.InfoWithCtx(c, "Deleting VM from GCP", "command", cmdStr)
+
+	stdout, stderr, _, err := tool.ExecCommand(cmdStr)
+	if err != nil {
+		// 检查是否是因为VM已经不存在导致的错误
+		if strings.Contains(stderr, "was not found") || strings.Contains(stderr, "not found") {
+			zlog.InfoWithCtx(c, "VM already deleted from GCP", "vm_id", vm.VMID)
+			return nil
+		}
+		zlog.ErrorWithCtx(c, "Failed to delete VM from GCP", err)
+		return err
+	}
+
+	zlog.InfoWithCtx(c, "VM deleted from GCP successfully", "stdout", stdout)
+	return nil
+}
+
 // generateRandomString 生成指定长度的随机字符串
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

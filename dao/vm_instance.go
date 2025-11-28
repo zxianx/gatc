@@ -123,3 +123,18 @@ func (d *VMInstanceDao) Delete(c *gin.Context, vmID string) error {
 	}
 	return err
 }
+
+// GetVMsCreatedBefore 获取指定时间之前创建的VM列表
+func (d *VMInstanceDao) GetVMsCreatedBefore(c *gin.Context, cutoffTime time.Time) ([]VMInstance, error) {
+	zlog.InfoWithCtx(c, "Querying VMs created before", "cutoffTime", cutoffTime)
+	
+	var vms []VMInstance
+	err := helpers.GatcDbClient.Where("created_at < ? AND status != ?", cutoffTime, 3).Find(&vms).Error
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to query old VMs", err)
+		return nil, err
+	}
+	
+	zlog.InfoWithCtx(c, "Found VMs created before cutoff", "count", len(vms), "cutoffTime", cutoffTime)
+	return vms, nil
+}

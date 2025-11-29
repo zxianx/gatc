@@ -14,6 +14,7 @@ import (
 	mrand "math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,10 +94,23 @@ var GVmService = &VMService{}
 // CleanupOldVMs 清理24小时前创建的VM
 func (s *VMService) CleanupOldVMs() {
 	c := &gin.Context{}
-	zlog.InfoWithCtx(c, "Starting cleanup of old VMs")
+
+	// 每小时清理24小时前的VM
+	existH := os.Getenv("CLEAN_OLD_VM_EXIST_EXCEED_H")
+	if existH == "" {
+		zlog.InfoWithCtx(c, "SKIP. Starting cleanup of old VMs")
+		return
+	}
+	h, err2 := strconv.Atoi(existH)
+	if err2 != nil {
+		zlog.Error("CleanupOldVMs ", "illegal CLEAN_OLD_VM_EXIST_EXCEED_H, val:", existH)
+		return
+	}
+
+	zlog.InfoWithCtx(c, "Starting cleanup of old VMs, ", h)
 
 	// 获取24小时前创建的VM
-	cutoffTime := time.Now().Add(-24 * time.Hour)
+	cutoffTime := time.Now().Add(-time.Duration(h) * time.Hour)
 
 	vms, err := dao.GVmInstanceDao.GetVMsCreatedBefore(c, cutoffTime)
 	if err != nil {

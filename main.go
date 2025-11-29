@@ -55,7 +55,6 @@ func main() {
 
 	// 初始化定时任务
 	cron.Init()
-	// 每小时清理24小时前的VM
 	cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs)
 	cron.Start()
 

@@ -7,6 +7,8 @@ const (
 	DefaultMachineType    = "e2-small"
 	MaxProjectsPerAccount = 12
 	VMInitScriptPath      = "./scripts/vm_init.sh"
+	VMInitScriptTinyProxyPath = "./scripts/vm_init_tinyproxy.sh"
+	VMInitScriptHttpProxyPath = "./scripts/vm_init_httpproxy.sh"
 
 	// SSH密钥配置
 	SSHKeyPath    = "./conf/gcp/gatc_rsa"
@@ -16,4 +18,9 @@ const (
 	VMStatusRunning = 1
 	VMStatusStopped = 2
 	VMStatusDeleted = 3
+	
+	// 代理类型
+	ProxyTypeSocks5       = "socks5"
+	ProxyTypeTinyProxy    = "tinyproxy"
+	ProxyTypeHttpProxy    = "httpProxyServer"
 )

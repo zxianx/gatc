@@ -17,7 +17,8 @@ type VMInstance struct {
 	MachineType   string    `json:"machine_type" gorm:"column:machine_type;size:64;not null"`
 	ExternalIP    string    `json:"external_ip" gorm:"column:external_ip;size:45"`
 	InternalIP    string    `json:"internal_ip" gorm:"column:internal_ip;size:45"`
-	Proxy         string    `json:"proxy" gorm:"column:proxy;size:255"` // SOCKS5代理信息，格式：user1:pass123@ip:port
+	Proxy         string    `json:"proxy" gorm:"column:proxy;size:255"` // 代理信息，格式：user1:pass123@ip:port
+	ProxyType     string    `json:"proxy_type" gorm:"column:proxy_type;size:16"` // 代理类型：socks5/tinyproxy
 	SSHUser       string    `json:"ssh_user" gorm:"column:ssh_user;size:64"`
 	SSHKeyContent string    `json:"ssh_key_content" gorm:"column:ssh_key_content;type:text"`
 	Status        int       `json:"status" gorm:"column:status;not null;default:1;index"`

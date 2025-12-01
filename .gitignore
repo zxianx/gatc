@@ -9,3 +9,4 @@ conf/*.yaml
 gcp3999-2.sh
 .DS_Store
 tmp/
+vmHttpServerProxy/vm-http-proxy

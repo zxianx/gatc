@@ -28,6 +28,7 @@ type CreateVMParam struct {
 	Zone        string `json:"zone,omitempty"`
 	MachineType string `json:"machine_type,omitempty"`
 	Tag         string `json:"tag,omitempty"`
+	ProxyType   string `json:"proxy_type,omitempty"` // 代理类型：socks5(默认)/tinyproxy
 }
 
 // CreateVMResult 创建VM返回结果
@@ -320,6 +321,16 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		machineType = param.MachineType
 	}
 
+	// 处理代理类型，默认为socks5
+	proxyType := constants.ProxyTypeSocks5
+	if param.ProxyType != "" {
+		if param.ProxyType == constants.ProxyTypeTinyProxy {
+			proxyType = constants.ProxyTypeTinyProxy
+		} else if param.ProxyType == constants.ProxyTypeHttpProxy {
+			proxyType = constants.ProxyTypeHttpProxy
+		}
+	}
+
 	if err := s.EnsureSSHKeys(); err != nil {
 		return nil, fmt.Errorf("failed to ensure SSH keys: %v", err)
 	}
@@ -336,10 +347,20 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	}
 
 	projectID := gcpConfig.GetProjectID()
-	vmName := fmt.Sprintf("gatc-vm-%s-%s", param.Tag, time.Now().Format("20060102150405"))
+	vmName := fmt.Sprintf("gatcvm-%s-%s-%s", proxyType, param.Tag, time.Now().Format("20060102150405"))
 
-	// 生成SOCKS5代理的用户名和密码
+	// 生成代理的用户名和密码
 	proxyUsername, proxyPassword := generateProxyCredentials()
+
+	// 根据代理类型选择初始化脚本
+	var initScriptPath string
+	if proxyType == constants.ProxyTypeTinyProxy {
+		initScriptPath = constants.VMInitScriptTinyProxyPath
+	} else if proxyType == constants.ProxyTypeHttpProxy {
+		initScriptPath = constants.VMInitScriptHttpProxyPath
+	} else {
+		initScriptPath = constants.VMInitScriptPath
+	}
 
 	// 使用SSH公钥作为metadata
 	sshKeyMetadata := fmt.Sprintf("gatc:%s", strings.TrimSpace(gcpConfig.GetSSHPubKeyContent()))
@@ -351,7 +372,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		"--metadata=ssh-keys='%s',proxy-username='%s',proxy-password='%s' "+
 		"--metadata-from-file=startup-script=%s "+
 		"--tags=http-server,https-server --format=json",
-		vmName, projectID, zone, machineType, sshKeyMetadata, proxyUsername, proxyPassword, constants.VMInitScriptPath)
+		vmName, projectID, zone, machineType, sshKeyMetadata, proxyUsername, proxyPassword, initScriptPath)
 
 	zlog.InfoWithCtx(c, "Executing gcloud command to create VM", "command", cmdStr)
 
@@ -384,8 +405,18 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		zlog.InfoWithCtx(c, "Failed to get external IP after all retries, VM created but IP is pending")
 	}
 
-	// 使用已生成的代理用户名和密码构建完整代理地址
-	proxyAuth := fmt.Sprintf("%s:%s@%s:1080", proxyUsername, proxyPassword, externalIP)
+	// 根据代理类型构建代理地址
+	var proxyAuth string
+	if proxyType == constants.ProxyTypeTinyProxy {
+		// TinyProxy HTTP代理使用8080端口，不使用认证
+		proxyAuth = fmt.Sprintf("http://%s:8080", externalIP)
+	} else if proxyType == constants.ProxyTypeHttpProxy {
+		// 自定义HTTP代理使用1081端口，路径代理模式
+		proxyAuth = fmt.Sprintf("http://%s:1081/px", externalIP)
+	} else {
+		// SOCKS5代理使用1080端口
+		proxyAuth = fmt.Sprintf("%s:%s@%s:1080", proxyUsername, proxyPassword, externalIP)
+	}
 
 	vmInstance := &dao.VMInstance{
 		VMID:          vmName,
@@ -394,6 +425,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		MachineType:   machineType,
 		ExternalIP:    externalIP,
 		Proxy:         proxyAuth,
+		ProxyType:     proxyType,
 		SSHUser:       "gatc",
 		SSHKeyContent: gcpConfig.GetSSHKeyContent(),
 		Status:        constants.VMStatusRunning,
@@ -408,7 +440,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		VMName:        vmName,
 		ExternalIP:    externalIP,
 		Proxy:         proxyAuth,
-		SSHConnection: fmt.Sprintf("ssh gatc@%s", externalIP),
+		SSHConnection: fmt.Sprintf("ssh -i ./conf/gcp/gatc_rsa gatc@%s", externalIP),
 	}, nil
 }
 

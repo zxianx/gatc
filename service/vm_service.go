@@ -347,7 +347,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	}
 
 	projectID := gcpConfig.GetProjectID()
-	vmName := fmt.Sprintf("gatcvm-%s-%s-%s", proxyType, param.Tag, time.Now().Format("20060102150405"))
+	vmName := fmt.Sprintf("gatcvm-%s-%s-%s", strings.ToLower(proxyType), strings.ToLower(param.Tag), time.Now().Format("20060102150405"))
 
 	// 生成代理的用户名和密码
 	proxyUsername, proxyPassword := generateProxyCredentials()

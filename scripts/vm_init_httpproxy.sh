@@ -28,7 +28,7 @@ echo "[.2]Installing Google Cloud SDK..."
 # 下载自定义HTTP代理服务器
 echo "Installing custom HTTP proxy server..."
 # TODO: 替换为实际的GitHub仓库URL
-wget https://github.com/yourusername/gatc/releases/latest/download/vm-http-proxy -O /usr/local/bin/vm-http-proxy || {
+wget https://raw.githubusercontent.com/zxianx/gatc/refs/heads/main/vmHttpServerProxy/vm-http-proxy-linux-amd64 -O /usr/local/bin/vm-http-proxy || {
     echo "Failed to download vm-http-proxy, creating placeholder..."
     echo '#!/bin/bash' > /usr/local/bin/vm-http-proxy
     echo 'echo "vm-http-proxy placeholder"' >> /usr/local/bin/vm-http-proxy

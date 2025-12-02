@@ -66,8 +66,8 @@ Restart=always
 RestartSec=5
 User=root
 Environment=HttpServerProxyPort=1081
-Environment=force_https=true
-Environment=proxy_url_keyword_white_list=generativelanguage.googleapis.com|api.anthropic.com|ifconfig.me
+Environment=force_https=false
+Environment=proxy_url_keyword_white_list=googleapis|anthropic|ifconfig|gemini|generateContent|completions|chatgpt|openai|vertex|aiPlatform
 Environment=proxy_del_headers=User-Agent|X-Forwarded-For
 LimitNOFILE=65535
 

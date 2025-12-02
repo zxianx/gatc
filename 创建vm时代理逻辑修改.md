@@ -35,8 +35,8 @@ chmod +x /usr/local/bin/vm-http-proxy
 
 # 配置环境变量
 export HttpServerProxyPort=1081
-export force_https=true
-export proxy_url_keyword_white_list="generativelanguage.googleapis.com|api.anthropic.com|ifconfig.me"
+export force_https=false
+export proxy_url_keyword_white_list="googleapis|anthropic|ifconfig.me|file.txt|gemini|generateContent|completions|chatgpt|openai|vertex|aiPlatform"
 export proxy_del_headers="X-Forwarded-For"
 
 # 创建systemd服务
@@ -53,7 +53,7 @@ Restart=always
 RestartSec=5
 User=root
 Environment=HttpServerProxyPort=1081
-Environment=force_https=true
+Environment=force_https=false
 Environment=proxy_url_keyword_white_list=generativelanguage.googleapis.com|api.anthropic.com|ifconfig.me
 Environment=proxy_del_headers=User-Agent|X-Forwarded-For
 LimitNOFILE=65535

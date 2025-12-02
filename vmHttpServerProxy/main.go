@@ -67,7 +67,10 @@ func getConfig() *Config {
 	}
 
 	if whiteList := os.Getenv("proxy_url_keyword_white_list"); whiteList != "" {
-		config.URLKeywordWhiteList = strings.Split(whiteList, "|")
+		tmp := strings.Split(whiteList, "|")
+		for _, s := range tmp {
+			config.URLKeywordWhiteList = append(config.URLKeywordWhiteList, strings.ToLower(s))
+		}
 	}
 
 	if delHeaders := os.Getenv("proxy_del_headers"); delHeaders != "" {
@@ -83,7 +86,7 @@ func (c *Config) isURLAllowed(targetURL string) bool {
 	}
 
 	for _, keyword := range c.URLKeywordWhiteList {
-		if strings.Contains(targetURL, keyword) {
+		if strings.Contains(strings.ToLower(targetURL), keyword) {
 			return true
 		}
 	}

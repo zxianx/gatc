@@ -729,6 +729,12 @@ func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) error
 		UpdatedAt: now,                   // updated_at
 	}
 
+	//todo 配置
+	if strings.Contains(project.Sock5Proxy, "/px") {
+		// https://generativelanguage.googleapis.com
+		officialToken.BaseUrl = strings.TrimRight(project.Sock5Proxy, "/") + "/" + "https%3A%2F%2Fgenerativelanguage.googleapis.com"
+	}
+
 	return officialToken.Create(ginCtx.(*gin.Context))
 }
 

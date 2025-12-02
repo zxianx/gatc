@@ -35,7 +35,7 @@ type GCPAccount struct {
 	TokenStatus     int       `json:"token_status" gorm:"column:token_status;not null;default:0;index"`
 	ProjectStatus   int       `json:"project_status" gorm:"column:project_status;not null;default:0;index"` // 字段还没用到
 	VMID            string    `json:"vm_id" gorm:"column:vm_id;size:128;not null;default:'';index"`
-	Sock5Proxy      string    `json:"sock5_proxy" gorm:"column:sock5_proxy;not null;default:'';size:128"` // VM里面的信息，额外存个字段
+	Sock5Proxy      string    `json:"sock5_proxy" gorm:"column:sock5_proxy;not null;default:'';size:128"` // VM里面的信息，额外存个字段, 沿用字段名，实际多种类型proxy
 	OfficialToken   string    `json:"official_token" gorm:"column:official_token;not null;type:text"`
 	OfficialTokenId int64     `json:"official_token_id" gorm:"column:official_token_id;not null;index"` //OfficialToken 写其他表，暂时没id， 插入成功这里标记个1
 	Region          string    `json:"region" gorm:"column:region;size:64"`

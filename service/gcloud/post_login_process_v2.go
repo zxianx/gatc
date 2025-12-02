@@ -143,6 +143,7 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行Step1: 项目设置", "邮箱", ctx.Ctx.Email)
 
 	// 1. 获取CLI项目列表（不用填扩展信息）
+
 	cliProjects, err := getCLIProjects(ctx.Ctx)
 	if err != nil {
 		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "获取到CLI项目失败", err.Error())
@@ -346,7 +347,7 @@ func getCLIProjects(workCtx *WorkCtx) ([]GCPProject, error) {
 		"gcloud projects list --format=json",
 	)
 
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("获取CLI项目列表失败: %v, output: %s", err, string(output))
 	}
@@ -389,7 +390,7 @@ func createProjects(workCtx *WorkCtx, count int) ([]string, error) {
 			fmt.Sprintf("gcloud projects create %s --name='GATC Project'", projectID),
 		)
 
-		output, err := cmd.CombinedOutput()
+		output, err := cmd.Output()
 		if err != nil {
 			zlog.ErrorWithCtx(workCtx.GinCtx, fmt.Sprintf("创建项目失败 项目ID:%s output:%s", projectID, string(output)), err)
 			break
@@ -421,7 +422,7 @@ func generateTokenForProject(workCtx *WorkCtx, projectID string) (bool, string) 
 			fmt.Sprintf("gcloud services enable %s --project=%s", service, projectID),
 		)
 
-		if _, err := cmd.CombinedOutput(); err != nil {
+		if _, err := cmd.Output(); err != nil {
 			zlog.ErrorWithCtx(workCtx.GinCtx, fmt.Sprintf("启用服务失败 项目:%s 服务:%s", projectID, service), err)
 			return false, ""
 		}
@@ -437,7 +438,7 @@ func generateTokenForProject(workCtx *WorkCtx, projectID string) (bool, string) 
 		fmt.Sprintf(`gcloud services api-keys create --project="%s" --display-name="Gemini API Key" --api-target=service=generativelanguage.googleapis.com --format=json 2>/dev/null`, projectID),
 	)
 
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
 		zlog.ErrorWithCtx(workCtx.GinCtx, fmt.Sprintf("创建API Key失败 项目:%s", projectID), err)
 		return false, ""
@@ -495,7 +496,7 @@ func getBillingProjectsInfo(ctx *PostLoginProcessCtx) (map[string]string, []stri
 
 		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "[CMD]", cmdd)
 
-		billingOutput, err := billingCmd.CombinedOutput()
+		billingOutput, err := billingCmd.Output()
 		if err != nil {
 			zlog.WarnWithCtx(ctx.Ctx.GinCtx, "检查项目billing状态失败", "项目ID", projectID, "错误", err)
 			continue
@@ -518,7 +519,7 @@ func getBillingProjectsInfo(ctx *PostLoginProcessCtx) (map[string]string, []stri
 		"gcloud billing accounts list --filter='open=true' --format='value(name)' 2>/dev/null || echo ''",
 	)
 
-	accountsOutput, err := accountsCmd.CombinedOutput()
+	accountsOutput, err := accountsCmd.Output()
 	if err != nil {
 		zlog.WarnWithCtx(ctx.Ctx.GinCtx, "获取billing账户列表失败", "错误", err)
 	} else {
@@ -663,7 +664,7 @@ func bindProjectToBilling(workCtx *WorkCtx, projectID, billingAccount string) bo
 		fmt.Sprintf("gcloud billing projects link %s --billing-account=%s", projectID, billingAccount),
 	)
 
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
 		// 符合预期，不记录详细错误
 		zlog.InfoWithCtx(workCtx.GinCtx, fmt.Sprintf("绑定billing失败 项目:%s 账户:%s output:%s", projectID, billingAccount, string(output)), err)
@@ -794,7 +795,7 @@ func unbindProjectBilling(workCtx *WorkCtx, projectID string) error {
 		fmt.Sprintf("gcloud billing projects unlink %s", projectID),
 	)
 
-	output, err := cmd.CombinedOutput()
+	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("解绑billing失败: %v, output: %s", err, string(output))
 	}

@@ -27,7 +27,7 @@ func (ctx *WorkCtx) CheckTargetAccount() (AccountAuthStatus, error) {
 		"gcloud auth list --format='value(account,status)'",
 	)
 
-	output, err := listCmd.CombinedOutput()
+	output, err := listCmd.Output()
 	if err != nil {
 		zlog.ErrorWithMsgAndCtx(ctx.GinCtx, "CheckTargetAccount fail, ", ctx.VMInstance.VMID, ctx.VMInstance.ExternalIP, "【CMD】", listCmd.String())
 		return "", fmt.Errorf("failed to list accounts: %v  %s", err, output)
@@ -74,7 +74,7 @@ func (ctx *WorkCtx) SwitchToAccount() error {
 		fmt.Sprintf("gcloud config set account %s", ctx.Email),
 	)
 
-	output, err := switchCmd.CombinedOutput()
+	output, err := switchCmd.Output()
 	zlog.Info("Switch account output for session, ", ctx.SessionID, string(output))
 
 	if err != nil {

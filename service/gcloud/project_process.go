@@ -146,33 +146,6 @@ func (ctx *ProjectProcessCtx) getAvailableBillingAccount() (string, error) {
 	return "", fmt.Errorf("billing account格式异常: %s", billingAccount)
 }
 
-// listProjects 获取当前账户的所有项目
-func (ctx *ProjectProcessCtx) listProjects() ([]GCPProject, error) {
-	cmd := exec.Command(
-		"ssh",
-		"-i", constants.SSHKeyPath,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("%s@%s", ctx.baseCtx.VMInstance.SSHUser, ctx.baseCtx.VMInstance.ExternalIP),
-		"gcloud projects list --format=json",
-	)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, "获取项目列表失败", err)
-		return nil, fmt.Errorf("failed to list projects: %v, output: %s", err, string(output))
-	}
-
-	var projects []GCPProject
-	if err := json.Unmarshal(output, &projects); err != nil {
-		zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, "解析项目列表失败", err)
-		return nil, fmt.Errorf("failed to parse projects: %v", err)
-	}
-
-	zlog.InfoWithCtx(ctx.baseCtx.GinCtx, "成功获取项目列表", "项目数量", len(projects))
-	return projects, nil
-}
-
 // syncProjectsToDB 同步项目到数据库，同时检查billing和token状态
 func (ctx *ProjectProcessCtx) syncProjectsToDB(projects []GCPProject) error {
 	zlog.InfoWithCtx(ctx.baseCtx.GinCtx, "开始同步项目并检查状态", "项目数量", len(projects))

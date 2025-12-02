@@ -1,7 +1,6 @@
 package gcloud
 
 import (
-	"encoding/json"
 	"fmt"
 	"gatc/base/zlog"
 	"gatc/constants"
@@ -25,33 +24,6 @@ func NewProjectManager(ctx *WorkCtx) *ProjectManager {
 	}
 }
 
-// ListProjects 获取当前账户的所有项目
-func (pm *ProjectManager) ListProjects() ([]GCPProject, error) {
-	cmd := exec.Command(
-		"ssh",
-		"-i", constants.SSHKeyPath,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("%s@%s", pm.ctx.VMInstance.SSHUser, pm.ctx.VMInstance.ExternalIP),
-		"gcloud projects list --format=json",
-	)
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		zlog.ErrorWithCtx(pm.ctx.GinCtx, "获取项目列表失败", err)
-		return nil, fmt.Errorf("failed to list projects: %v, output: %s", err, string(output))
-	}
-
-	var projects []GCPProject
-	if err := json.Unmarshal(output, &projects); err != nil {
-		zlog.ErrorWithCtx(pm.ctx.GinCtx, "解析项目列表失败", err)
-		return nil, fmt.Errorf("failed to parse projects: %v", err)
-	}
-
-	zlog.InfoWithCtx(pm.ctx.GinCtx, "成功获取项目列表", "项目数量", len(projects))
-	return projects, nil
-}
-
 // SyncProjectsToDB 同步项目到数据库
 func (pm *ProjectManager) SyncProjectsToDB(projects []GCPProject) error {
 	for _, project := range projects {
@@ -68,7 +40,7 @@ func (pm *ProjectManager) SyncProjectsToDB(projects []GCPProject) error {
 				Email:         pm.ctx.Email,
 				ProjectID:     project.ProjectID,
 				BillingStatus: dao.BillingStatusUnbound, // 默认未绑卡
-				TokenStatus: dao.TokenStatusNone,    // 默认无token
+				TokenStatus:   dao.TokenStatusNone,      // 默认无token
 				VMID:          pm.ctx.VMInstance.VMID,
 				Region:        "us-central1", // 默认区域
 				AuthStatus:    1,             // 认证成功状态
@@ -120,7 +92,7 @@ func (pm *ProjectManager) CreateProjects(currentCount int, targetCount int) ([]s
 			fmt.Sprintf("gcloud projects create %s --name='GATC Project %d'", projectID, i+1),
 		)
 
-		output, err := cmd.CombinedOutput()
+		output, err := cmd.Output()
 		if err != nil {
 			zlog.ErrorWithCtx(pm.ctx.GinCtx, "创建项目失败", fmt.Errorf("项目: %s, 错误: %v, 输出: %s", projectID, err, string(output)))
 			continue
@@ -134,7 +106,7 @@ func (pm *ProjectManager) CreateProjects(currentCount int, targetCount int) ([]s
 			Email:         pm.ctx.Email,
 			ProjectID:     projectID,
 			BillingStatus: dao.BillingStatusUnbound, // 新项目默认未绑卡
-			TokenStatus: dao.TokenStatusNone,    // 新项目默认无token
+			TokenStatus:   dao.TokenStatusNone,      // 新项目默认无token
 			VMID:          pm.ctx.VMInstance.VMID,
 			Region:        "us-central1",
 			AuthStatus:    1, // 认证成功状态
@@ -295,7 +267,7 @@ func (pm *ProjectManager) createGeminiTokenForProject(projectID string) (string,
 		fmt.Sprintf("cat /tmp/%s-key.json", projectID),
 	)
 
-	keyContent, err := catCmd.CombinedOutput()
+	keyContent, err := catCmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to read service account key: %v", err)
 	}

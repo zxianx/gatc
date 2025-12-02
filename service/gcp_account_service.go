@@ -20,7 +20,7 @@ import (
 // StartAccountRegistrationParam 开始开号参数
 type StartAccountRegistrationParam struct {
 	Email     string `json:"email" form:"email"`
-	ProxyType string `json:"proxy_type,omitempty"`
+	ProxyType string `json:"proxy_type,omitempty"  form:"proxy_type,omitempty"`
 }
 
 // StartAccountRegistrationResult 开始开号返回结果

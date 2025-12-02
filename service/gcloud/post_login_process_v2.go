@@ -422,8 +422,8 @@ func generateTokenForProject(workCtx *WorkCtx, projectID string) (bool, string) 
 			fmt.Sprintf("gcloud services enable %s --project=%s", service, projectID),
 		)
 
-		if _, err := cmd.Output(); err != nil {
-			zlog.ErrorWithCtx(workCtx.GinCtx, fmt.Sprintf("启用服务失败 项目:%s 服务:%s", projectID, service), err)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			zlog.ErrorWithCtx(workCtx.GinCtx, fmt.Sprintf("启用服务失败 项目:%s 服务:%s, %s", projectID, service, output), err)
 			return false, ""
 		}
 	}
@@ -664,7 +664,7 @@ func bindProjectToBilling(workCtx *WorkCtx, projectID, billingAccount string) bo
 		fmt.Sprintf("gcloud billing projects link %s --billing-account=%s", projectID, billingAccount),
 	)
 
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// 符合预期，不记录详细错误
 		zlog.InfoWithCtx(workCtx.GinCtx, fmt.Sprintf("绑定billing失败 项目:%s 账户:%s output:%s", projectID, billingAccount, string(output)), err)

@@ -145,6 +145,7 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 	// 1. 获取CLI项目列表（不用填扩展信息）
 	cliProjects, err := getCLIProjects(ctx.Ctx)
 	if err != nil {
+		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "获取到CLI项目失败", err.Error())
 		return fmt.Errorf("获取CLI项目列表失败: %v", err)
 	}
 
@@ -352,7 +353,7 @@ func getCLIProjects(workCtx *WorkCtx) ([]GCPProject, error) {
 
 	var projects []GCPProject
 	if err := json.Unmarshal(output, &projects); err != nil {
-		return nil, fmt.Errorf("解析项目JSON失败: %v", err)
+		return nil, fmt.Errorf("解析项目JSON失败: str[%s] err: %v ", string(output), err)
 	}
 
 	return projects, nil

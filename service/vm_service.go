@@ -724,26 +724,26 @@ func (s *VMService) SyncVMsWithGCP() {
 	}
 
 	// 创建GCP实例名称的集合 (只包含GATC创建的VM)
-	gcpVMNames := make(map[string]GCPVMInstance)
+	gcpVMIds := make(map[string]GCPVMInstance)
 	for _, gcpVM := range gcpInstances {
-		if s.isGATCVM(gcpVM.Name) {
-			gcpVMNames[gcpVM.Name] = gcpVM
+		if s.isGATCVM(gcpVM.ID) {
+			gcpVMIds[gcpVM.ID] = gcpVM
 		}
 	}
 
 	// 创建数据库实例名称的集合 (只包含GATC创建的VM)
-	dbVMNames := make(map[string]dao.VMInstance)
+	dbVMIds := make(map[string]dao.VMInstance)
 	for _, dbVM := range dbInstances {
 		if s.isGATCVM(dbVM.VMID) {
-			dbVMNames[dbVM.VMID] = dbVM
+			dbVMIds[dbVM.VMID] = dbVM
 		}
 	}
 
 	// B-A: 数据库中有但GCP中没有的GATC VM，设置为删除状态
 	var toDeleteVMIDs []string
-	for vmName := range dbVMNames {
-		if _, exists := gcpVMNames[vmName]; !exists {
-			toDeleteVMIDs = append(toDeleteVMIDs, vmName)
+	for ID := range dbVMIds {
+		if _, exists := gcpVMIds[ID]; !exists {
+			toDeleteVMIDs = append(toDeleteVMIDs, ID)
 		}
 	}
 
@@ -757,12 +757,12 @@ func (s *VMService) SyncVMsWithGCP() {
 
 	// A-B: GCP中有但数据库中没有的GATC VM，插入到数据库
 	var toInsertVMs []*dao.VMInstance
-	for vmName, gcpVM := range gcpVMNames {
-		if _, exists := dbVMNames[vmName]; !exists {
+	for vmId, gcpVM := range gcpVMIds {
+		if _, exists := dbVMIds[vmId]; !exists {
 			// 只插入运行状态的GATC VM
 			if gcpVM.Status == "RUNNING" {
 				newVM := &dao.VMInstance{
-					VMID:        gcpVM.Name,
+					VMID:        gcpVM.ID,
 					VMName:      gcpVM.Name,
 					Zone:        gcpVM.Zone,
 					MachineType: gcpVM.MachineType,
@@ -792,9 +792,9 @@ func (s *VMService) SyncVMsWithGCP() {
 
 	zlog.InfoWithCtx(c, "GATC VM sync with GCP completed",
 		"totalGCPVMs", len(gcpInstances),
-		"gatcGCPVMs", len(gcpVMNames),
+		"gatcGCPVMs", len(gcpVMIds),
 		"totalDBVMs", len(dbInstances),
-		"gatcDBVMs", len(dbVMNames),
+		"gatcDBVMs", len(dbVMIds),
 		"deleted", len(toDeleteVMIDs),
 		"inserted", successCount)
 }

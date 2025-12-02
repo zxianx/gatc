@@ -55,7 +55,7 @@ func main() {
 
 	// 初始化定时任务
 	cron.Init()
-	cron.AddFunc("Cleanup 24H ago VMs", "@every 1m", service.GVmService.CleanupOldVMs)
+	cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs)
 	cron.AddFunc("Sync VMs with GCP", "@every 1h", service.GVmService.SyncVMsWithGCP)
 	cron.Start()
 

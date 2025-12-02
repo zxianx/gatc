@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"gatc/base/config"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -28,7 +30,7 @@ type CreateVMParam struct {
 	Zone        string `json:"zone,omitempty"`
 	MachineType string `json:"machine_type,omitempty"`
 	Tag         string `json:"tag,omitempty"`
-	ProxyType   string `json:"proxy_type,omitempty"` // 代理类型：socks5(默认)/tinyproxy
+	ProxyType   string `json:"proxy_type,omitempty"` // 代理类型：socks5(默认)/tinyproxy  //
 }
 
 // CreateVMResult 创建VM返回结果
@@ -92,8 +94,23 @@ type VMService struct{}
 
 var GVmService = &VMService{}
 
+// 防止并发执行的标志位
+var cleanupRunning atomic.Bool
+
+// isGATCVM 检查VM名称是否是GATC创建的VM
+func (s *VMService) isGATCVM(vmName string) bool {
+	return strings.HasPrefix(vmName, "gatc-vm") || strings.HasPrefix(vmName, "gatcvm")
+}
+
 // CleanupOldVMs 清理24小时前创建的VM
 func (s *VMService) CleanupOldVMs() {
+	// 防止并发执行
+	if !cleanupRunning.CompareAndSwap(false, true) {
+		zlog.Info("VM cleanup already running, skipping this execution")
+		return
+	}
+	defer cleanupRunning.Store(false)
+
 	c := &gin.Context{}
 
 	// 每小时清理24小时前的VM
@@ -126,6 +143,12 @@ func (s *VMService) CleanupOldVMs() {
 
 	successCount := 0
 	for _, vm := range vms {
+		// 只处理GATC创建的VM
+		if !s.isGATCVM(vm.VMID) {
+			zlog.InfoWithCtx(c, "Skipping non-GATC VM during cleanup", "vmId", vm.VMID)
+			continue
+		}
+
 		// 删除GCP中的VM实例
 		if err := s.deleteVMFromGCP(c, &vm); err != nil {
 			zlog.ErrorWithCtx(c, "Failed to delete VM from GCP", err)
@@ -139,10 +162,10 @@ func (s *VMService) CleanupOldVMs() {
 		}
 
 		successCount++
-		zlog.InfoWithCtx(c, "Deleted old VM")
+		zlog.InfoWithCtx(c, "Deleted old VM", "vmId", vm.VMID)
 	}
 
-	zlog.InfoWithCtx(c, "Cleanup of old VMs completed")
+	zlog.InfoWithCtx(c, "Cleanup of old VMs completed", "processed", successCount)
 }
 
 // deleteVMFromGCP 从GCP中删除VM实例
@@ -326,7 +349,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	if param.ProxyType != "" {
 		if param.ProxyType == constants.ProxyTypeTinyProxy {
 			proxyType = constants.ProxyTypeTinyProxy
-		} else if param.ProxyType == constants.ProxyTypeHttpProxy {
+		} else if param.ProxyType == constants.ProxyTypeHttpProxy || param.ProxyType == "service" {
 			proxyType = constants.ProxyTypeHttpProxy
 		}
 	}
@@ -588,4 +611,190 @@ func (s *VMService) RefreshVMIP(c *gin.Context, param *RefreshVMIPParam) (*Refre
 		ExternalIP: newIP,
 		Updated:    updated,
 	}, nil
+}
+
+// GCPVMInstance GCP中的VM实例信息
+type GCPVMInstance struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Zone        string `json:"zone"`
+	MachineType string `json:"machineType"`
+	Status      string `json:"status"`
+	ExternalIP  string `json:"externalIP"`
+	InternalIP  string `json:"internalIP"`
+}
+
+// getGCPVMInstances 获取GCP中所有VM实例
+func (s *VMService) getGCPVMInstances(c *gin.Context) ([]GCPVMInstance, error) {
+	if err := s.activateServiceAccount(c); err != nil {
+		return nil, fmt.Errorf("failed to activate service account: %v", err)
+	}
+
+	gcpConfig := config.GetGCPConfig()
+	projectID := gcpConfig.GetProjectID()
+
+	cmdStr := fmt.Sprintf("gcloud compute instances list --project=%s --format=json", projectID)
+
+	zlog.InfoWithCtx(c, "Getting GCP VM instances", "command", cmdStr)
+
+	stdout, stderr, _, err := tool.ExecCommand(cmdStr)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to get GCP VM instances", err)
+		return nil, fmt.Errorf("failed to get GCP VM instances: %v, stderr: %s", err, stderr)
+	}
+
+	var rawInstances []map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &rawInstances); err != nil {
+		zlog.ErrorWithCtx(c, "Failed to parse GCP VM instances JSON", err)
+		return nil, fmt.Errorf("failed to parse GCP VM instances JSON: %v", err)
+	}
+
+	var instances []GCPVMInstance
+	for _, raw := range rawInstances {
+		instance := GCPVMInstance{}
+
+		if id, ok := raw["id"].(string); ok {
+			instance.ID = id
+		}
+
+		if name, ok := raw["name"].(string); ok {
+			instance.Name = name
+		}
+
+		if zone, ok := raw["zone"].(string); ok {
+			parts := strings.Split(zone, "/")
+			if len(parts) > 0 {
+				instance.Zone = parts[len(parts)-1]
+			}
+		}
+
+		if machineType, ok := raw["machineType"].(string); ok {
+			parts := strings.Split(machineType, "/")
+			if len(parts) > 0 {
+				instance.MachineType = parts[len(parts)-1]
+			}
+		}
+
+		if status, ok := raw["status"].(string); ok {
+			instance.Status = status
+		}
+
+		// 获取网络接口信息
+		if networkInterfaces, ok := raw["networkInterfaces"].([]interface{}); ok && len(networkInterfaces) > 0 {
+			if firstInterface, ok := networkInterfaces[0].(map[string]interface{}); ok {
+				if networkIP, ok := firstInterface["networkIP"].(string); ok {
+					instance.InternalIP = networkIP
+				}
+
+				if accessConfigs, ok := firstInterface["accessConfigs"].([]interface{}); ok && len(accessConfigs) > 0 {
+					if firstAccess, ok := accessConfigs[0].(map[string]interface{}); ok {
+						if natIP, ok := firstAccess["natIP"].(string); ok {
+							instance.ExternalIP = natIP
+						}
+					}
+				}
+			}
+		}
+
+		instances = append(instances, instance)
+	}
+
+	zlog.InfoWithCtx(c, "Found GCP VM instances", "count", len(instances))
+	return instances, nil
+}
+
+// SyncVMsWithGCP VM信息同步到数据库的定时任务
+func (s *VMService) SyncVMsWithGCP() {
+	c := &gin.Context{}
+
+	zlog.InfoWithCtx(c, "Starting VM sync with GCP")
+
+	// 获取GCP中所有VM实例 (集合A)
+	gcpInstances, err := s.getGCPVMInstances(c)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to get GCP VM instances during sync", err)
+		return
+	}
+
+	// 获取数据库中非已删除的记录 (集合B)
+	dbInstances, err := dao.GVmInstanceDao.GetActiveVMs(c)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to get active VM instances from DB during sync", err)
+		return
+	}
+
+	// 创建GCP实例名称的集合 (只包含GATC创建的VM)
+	gcpVMNames := make(map[string]GCPVMInstance)
+	for _, gcpVM := range gcpInstances {
+		if s.isGATCVM(gcpVM.Name) {
+			gcpVMNames[gcpVM.Name] = gcpVM
+		}
+	}
+
+	// 创建数据库实例名称的集合 (只包含GATC创建的VM)
+	dbVMNames := make(map[string]dao.VMInstance)
+	for _, dbVM := range dbInstances {
+		if s.isGATCVM(dbVM.VMID) {
+			dbVMNames[dbVM.VMID] = dbVM
+		}
+	}
+
+	// B-A: 数据库中有但GCP中没有的GATC VM，设置为删除状态
+	var toDeleteVMIDs []string
+	for vmName := range dbVMNames {
+		if _, exists := gcpVMNames[vmName]; !exists {
+			toDeleteVMIDs = append(toDeleteVMIDs, vmName)
+		}
+	}
+
+	if len(toDeleteVMIDs) > 0 {
+		if err := dao.GVmInstanceDao.BatchUpdateStatusDeleted(c, toDeleteVMIDs); err != nil {
+			zlog.ErrorWithCtx(c, "Failed to batch delete VMs during sync", err)
+		} else {
+			zlog.InfoWithCtx(c, "Marked VMs as deleted during sync", "count", len(toDeleteVMIDs), "vmIds", toDeleteVMIDs)
+		}
+	}
+
+	// A-B: GCP中有但数据库中没有的GATC VM，插入到数据库
+	var toInsertVMs []*dao.VMInstance
+	for vmName, gcpVM := range gcpVMNames {
+		if _, exists := dbVMNames[vmName]; !exists {
+			// 只插入运行状态的GATC VM
+			if gcpVM.Status == "RUNNING" {
+				newVM := &dao.VMInstance{
+					VMID:        gcpVM.Name,
+					VMName:      gcpVM.Name,
+					Zone:        gcpVM.Zone,
+					MachineType: gcpVM.MachineType,
+					ExternalIP:  gcpVM.ExternalIP,
+					InternalIP:  gcpVM.InternalIP,
+					Status:      constants.VMStatusRunning,
+					SSHUser:     "gatc", // 默认SSH用户
+				}
+				toInsertVMs = append(toInsertVMs, newVM)
+			}
+		}
+	}
+
+	// 批量插入新VM
+	successCount := 0
+	for _, vm := range toInsertVMs {
+		if err := dao.GVmInstanceDao.Create(c, vm); err != nil {
+			zlog.ErrorWithCtx(c, "Failed to insert VM during sync", err)
+		} else {
+			successCount++
+		}
+	}
+
+	if len(toInsertVMs) > 0 {
+		zlog.InfoWithCtx(c, "Inserted new GATC VMs during sync", "attempted", len(toInsertVMs), "success", successCount)
+	}
+
+	zlog.InfoWithCtx(c, "GATC VM sync with GCP completed",
+		"totalGCPVMs", len(gcpInstances),
+		"gatcGCPVMs", len(gcpVMNames),
+		"totalDBVMs", len(dbInstances),
+		"gatcDBVMs", len(dbVMNames),
+		"deleted", len(toDeleteVMIDs),
+		"inserted", successCount)
 }

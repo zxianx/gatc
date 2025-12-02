@@ -139,3 +139,39 @@ func (d *VMInstanceDao) GetVMsCreatedBefore(c *gin.Context, cutoffTime time.Time
 	zlog.InfoWithCtx(c, "Found VMs created before cutoff", "count", len(vms), "cutoffTime", cutoffTime)
 	return vms, nil
 }
+
+// GetActiveVMs 获取所有非已删除状态的VM实例
+func (d *VMInstanceDao) GetActiveVMs(c *gin.Context) ([]VMInstance, error) {
+	zlog.InfoWithCtx(c, "Querying all active VMs")
+	
+	var vms []VMInstance
+	err := helpers.GatcDbClient.Where("status != ?", 3).Find(&vms).Error
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to query active VMs", err)
+		return nil, err
+	}
+	
+	zlog.InfoWithCtx(c, "Found active VMs", "count", len(vms))
+	return vms, nil
+}
+
+// BatchUpdateStatusDeleted 批量设置VM状态为已删除
+func (d *VMInstanceDao) BatchUpdateStatusDeleted(c *gin.Context, vmIDs []string) error {
+	zlog.InfoWithCtx(c, "Batch updating VM status to deleted", "count", len(vmIDs))
+	
+	if len(vmIDs) == 0 {
+		return nil
+	}
+	
+	err := helpers.GatcDbClient.Model(&VMInstance{}).
+		Where("vm_id IN ?", vmIDs).
+		Update("status", 3).Error
+	
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to batch update VM status", err)
+	} else {
+		zlog.InfoWithCtx(c, "Successfully batch updated VM status", "count", len(vmIDs))
+	}
+	
+	return err
+}

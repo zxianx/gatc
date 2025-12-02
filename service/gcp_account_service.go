@@ -19,7 +19,8 @@ import (
 
 // StartAccountRegistrationParam 开始开号参数
 type StartAccountRegistrationParam struct {
-	Email string `json:"email" form:"email"`
+	Email     string `json:"email" form:"email"`
+	ProxyType string `json:"proxy_type,omitempty"`
 }
 
 // StartAccountRegistrationResult 开始开号返回结果
@@ -119,7 +120,9 @@ func (s *GcpAccountService) StartAccountRegistration(c *gin.Context, param *Star
 	if needCreateVm {
 		// 新建VM逻辑
 		zlog.InfoWithCtx(c, "创建新VM用于账户注册", "email", param.Email)
-		createResult, err := GVmService.CreateVM(c, &CreateVMParam{})
+		createResult, err := GVmService.CreateVM(c, &CreateVMParam{
+			ProxyType: param.ProxyType,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("创建新VM失败: %v", err)
 		}

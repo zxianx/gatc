@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"fmt"
+	"gatc/base/ratelimit"
 	"gatc/base/response"
 	"gatc/service"
 	"gatc/service/gcloud"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,17 +30,20 @@ type ListAccountRequest struct {
 // ProcessProjectsRequest 处理项目请求结构
 type ProcessProjectsRequest struct {
 	gcloud.ProjectProcessParam
+	SkipRateLimit bool `json:"skip_rate_limit,omitempty"  form:"skip_rate_limit,omitempty"`
 }
 
 type AccountHandler struct {
 	accountService *service.GcpAccountService
 	projectService *service.ProjectService
+	emailLimiter   *ratelimit.EmailRateLimiter // 邮箱请求频率限制器
 }
 
 func NewAccountHandler() *AccountHandler {
 	return &AccountHandler{
 		accountService: service.GGcpAccountService,
 		projectService: service.GProjectService,
+		emailLimiter:   ratelimit.NewEmailRateLimiter(10 * time.Minute), // 10分钟限制
 	}
 }
 
@@ -116,6 +122,17 @@ func (h *AccountHandler) ProcessProjectsV2(c *gin.Context) {
 		return
 	}
 
+	// 检查邮箱请求频率限制（V2也使用相同的限流器）
+	if param.Email != "" {
+		canProcess, remaining := h.emailLimiter.CanProcess(param.Email)
+		if !canProcess {
+			remainingMinutes := int(remaining.Minutes()) + 1 // 向上取整
+			response.Error(c, http.StatusTooManyRequests,
+				fmt.Sprintf("邮箱 %s 请求过于频繁，请等待 %d 分钟后再试", param.Email, remainingMinutes))
+			return
+		}
+	}
+
 	result, err := h.projectService.ProcessProjectsV2(c, &param.ProjectProcessParam)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
@@ -130,6 +147,17 @@ func (h *AccountHandler) ProcessProjectsV3(c *gin.Context) {
 	if err := c.ShouldBindQuery(&param); err != nil {
 		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
 		return
+	}
+
+	// 检查邮箱请求频率限制
+	if param.Email != "" && !param.SkipRateLimit {
+		canProcess, remaining := h.emailLimiter.CanProcess(param.Email)
+		if !canProcess {
+			remainingSecond := int(remaining.Seconds()) // 向上取整
+			response.Error(c, http.StatusTooManyRequests,
+				fmt.Sprintf("邮箱 %s 请求过于频繁，请等待 %d s后再试", param.Email, remainingSecond))
+			return
+		}
 	}
 
 	result, err := h.projectService.ProcessProjectsV3(c, &param.ProjectProcessParam)

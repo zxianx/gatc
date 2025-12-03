@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"gatc/base/zlog"
 	"gatc/constants"
 	"gatc/dao"
 	"gatc/service/gcloud"
@@ -64,6 +65,9 @@ func (s *ProjectService) ProcessProjectsV2(c *gin.Context, param *gcloud.Project
 // ProcessProjectsV2 使用新的5步流程处理项目
 func (s *ProjectService) ProcessProjectsV3(c *gin.Context, param *gcloud.ProjectProcessParam) (*gcloud.ProjectProcessResult, error) {
 	// 创建WorkCtx - 从数据库获取账号状态
+	if param != nil {
+		zlog.InfoWithCtx(c, "开始登录后处理流程ProcessProjectsV3", "邮箱", param.Email)
+	}
 	accountStatus, err := dao.GGcpAccountDao.GetAccountStatus(c, param.Email)
 	if err != nil {
 		return &gcloud.ProjectProcessResult{

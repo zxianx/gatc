@@ -683,8 +683,8 @@ func bindProjectToBilling(workCtx *WorkCtx, projectID, billingAccount string) bo
 	return true
 }
 
-func getValidProjectsForTokenSync(ginCtx any, email string) ([]dao.GCPAccount, error) {
-	allProjects, err := dao.GGcpAccountDao.GetProjectsByEmail(ginCtx.(*gin.Context), email)
+func getValidProjectsForTokenSync(ginCtx *gin.Context, email string) ([]dao.GCPAccount, error) {
+	allProjects, err := dao.GGcpAccountDao.GetProjectsByEmail(ginCtx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -701,9 +701,9 @@ func getValidProjectsForTokenSync(ginCtx any, email string) ([]dao.GCPAccount, e
 	return validProjects, nil
 }
 
-func getExistingOfficialTokens(ginCtx any, email string) (map[string]bool, error) {
+func getExistingOfficialTokens(ginCtx *gin.Context, email string) (map[string]bool, error) {
 	tokenDao := &dao.GormOfficialTokens{Email: email}
-	tokens, err := tokenDao.GetList(ginCtx.(*gin.Context), "project_id", "", "", 0, 0)
+	tokens, err := tokenDao.GetList(ginCtx, "project_id", "", "", 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +718,7 @@ func getExistingOfficialTokens(ginCtx any, email string) (map[string]bool, error
 	return existingTokens, nil
 }
 
-func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) (int64, error) {
+func insertOfficialToken(ginCtx *gin.Context, email string, project dao.GCPAccount) (int64, error) {
 	now := time.Now()
 
 	officialToken := &dao.GormOfficialTokens{
@@ -745,7 +745,7 @@ func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) (int6
 		officialToken.Proxy = ""
 	}
 
-	if err := officialToken.Create(ginCtx.(*gin.Context)); err != nil {
+	if err := officialToken.Create(ginCtx); err != nil {
 		return 0, err
 	}
 	return officialToken.Id, nil

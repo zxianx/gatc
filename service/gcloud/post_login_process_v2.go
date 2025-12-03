@@ -639,12 +639,20 @@ func PostLoginProcessStep5TokenSync(ctx *PostLoginProcessCtx) (int, error) {
 	for _, project := range validProjects {
 		if !existingTokens[project.ProjectID] {
 			// 新token，需要同步
-			if err2 := insertOfficialToken(ctx.Ctx.GinCtx, ctx.Ctx.Email, project); err2 != nil {
+			tokenId, err2 := insertOfficialToken(ctx.Ctx.GinCtx, ctx.Ctx.Email, project)
+			if err2 != nil {
 				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("插入official_token失败 项目ID:%s", project.ProjectID), err2)
 				continue
 			}
+			
+			// 回写token ID到账户表
+			if err3 := updateOfficialTokenIdDirect(ctx.Ctx.GinCtx, &project, tokenId); err3 != nil {
+				zlog.ErrorWithCtx(ctx.Ctx.GinCtx, fmt.Sprintf("更新official_token_id失败 项目ID:%s", project.ProjectID), err3)
+				// 不中断流程，继续处理下一个
+			}
+			
 			syncCount++
-			zlog.InfoWithCtx(ctx.Ctx.GinCtx, "同步token成功", "项目ID", project.ProjectID)
+			zlog.InfoWithCtx(ctx.Ctx.GinCtx, "同步token成功", "项目ID", project.ProjectID, "tokenId", tokenId)
 		}
 	}
 
@@ -710,7 +718,7 @@ func getExistingOfficialTokens(ginCtx any, email string) (map[string]bool, error
 	return existingTokens, nil
 }
 
-func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) error {
+func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) (int64, error) {
 	now := time.Now()
 
 	officialToken := &dao.GormOfficialTokens{
@@ -736,7 +744,36 @@ func insertOfficialToken(ginCtx any, email string, project dao.GCPAccount) error
 		officialToken.BaseUrl = strings.TrimRight(project.Sock5Proxy, "/") + "/" + "https%3A%2F%2Fgenerativelanguage.googleapis.com"
 	}
 
-	return officialToken.Create(ginCtx.(*gin.Context))
+	if err := officialToken.Create(ginCtx.(*gin.Context)); err != nil {
+		return 0, err
+	}
+	return officialToken.Id, nil
+}
+
+// updateOfficialTokenIdDirect 直接使用已有的dao对象更新official_token_id字段
+func updateOfficialTokenIdDirect(ginCtx any, account *dao.GCPAccount, tokenId int64) error {
+	// 更新official_token_id
+	account.OfficialTokenId = tokenId
+	account.UpdatedAt = time.Now()
+	
+	if err := dao.GGcpAccountDao.Save(ginCtx.(*gin.Context), account); err != nil {
+		return fmt.Errorf("failed to update official_token_id: %v", err)
+	}
+	
+	zlog.InfoWithCtx(ginCtx.(*gin.Context), "更新official_token_id成功",
+		"项目ID", account.ProjectID, "tokenId", tokenId)
+	return nil
+}
+
+// updateOfficialTokenId 更新gcp_accounts的official_token_id字段（兼容性保留）
+func updateOfficialTokenId(ginCtx any, email, projectID string, tokenId int64) error {
+	// 获取项目记录
+	account, err := dao.GGcpAccountDao.GetByEmailAndProject(ginCtx.(*gin.Context), email, projectID)
+	if err != nil {
+		return fmt.Errorf("failed to get project record: %v", err)
+	}
+	
+	return updateOfficialTokenIdDirect(ginCtx, account, tokenId)
 }
 
 // ====================== V3 新增函数 ======================

@@ -20,6 +20,7 @@ type GCPProjectExt struct {
 	GCPProject
 	BillingAccount string // 绑定的账单账户，nil表示还未获取
 	// Ext 为了一些信息可跨step用，避免重复代码
+	NewCreate bool
 }
 
 // GCPProject 基础项目信息
@@ -174,6 +175,7 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 		for _, projectID := range createdProjects {
 			ctx.CliProjectList = append(ctx.CliProjectList, GCPProjectExt{
 				GCPProject: GCPProject{ProjectID: projectID, Name: "GATC Project"},
+				NewCreate:  true,
 			})
 		}
 
@@ -477,6 +479,9 @@ func getBillingProjectsInfo(ctx *PostLoginProcessCtx) (map[string]string, []stri
 	// 直接使用ctx中已经获取的项目列表，避免重复CLI调用
 	// 遍历每个项目检查billing状态
 	for _, project := range ctx.CliProjectList {
+		if project.NewCreate {
+			continue
+		}
 		projectID := project.ProjectID
 		dbProject := ctx.DbProjectsMp[projectID]
 		if dbProject != nil && dbProject.BillingStatus == dao.BillingStatusDetach {
@@ -547,6 +552,7 @@ func PostLoginProcessV3Step3BillingBind(ctx *PostLoginProcessCtx) error {
 	billingAccount := ctx.BillingAccounts[0]
 	successCount := 0
 	// 对Unbound的项目，依次检查尝试绑定账单
+	bindFail := 0
 	for _, project := range ctx.CliProjectList {
 		dbProject := ctx.DbProjectsMp[project.ProjectID]
 		if dbProject == nil || dbProject.BillingStatus != dao.BillingStatusUnbound {
@@ -564,6 +570,11 @@ func PostLoginProcessV3Step3BillingBind(ctx *PostLoginProcessCtx) error {
 				ctx.Result.BoundProjects++
 				ctx.Result.BoundProjectsDetail = append(ctx.Result.BoundProjectsDetail, project.ProjectID)
 				zlog.InfoWithCtx(ctx.Ctx.GinCtx, "项目绑定成功", "项目ID", project.ProjectID, "账户", billingAccount)
+			}
+		} else {
+			bindFail++
+			if bindFail > 2 { // 错两次就不继续尝试了
+				break
 			}
 		}
 		// 这里不设置绑定失败状态，按要求

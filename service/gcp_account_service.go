@@ -163,10 +163,10 @@ func (s *GcpAccountService) StartAccountRegistration(c *gin.Context, param *Star
 	for i := 0; i < 6 && err != nil; i++ {
 		time.Sleep(5 * time.Second)
 		authStatus, err = gcloudCtx.CheckTargetAccount()
-		zlog.InfoWithCtx(c, fmt.Sprintf("获取登陆状态失败 重试次数 %d, err %v", i+1, err))
 	}
 	if err != nil {
-		ret.Msg = "获取登陆状态失败"
+		ret.Msg = "获取登陆状态失败: " + err.Error()
+		zlog.InfoWithCtx(c, ret.Msg)
 		return
 	}
 

@@ -9,7 +9,7 @@ type  httpProxyServer
 本项目下 vmHttpServerProxy 目录建独立程序，尽量精简，不依赖配置文件  
 配置通过env获取  
 + HttpServerProxyPort， 默认1081
-+ force_https  默认true， 将http请求代理转为https取请求
++ force_https  默认false， true则将http请求代理转为https取请求
 + proxy_url_keyword_white_list     "|"分隔的关键字
 + proxy_del_headers                "|"分隔的头名
 

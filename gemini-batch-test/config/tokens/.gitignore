@@ -1,0 +1,7 @@
+# 忽略所有token配置文件，保护隐私
+*.json
+*.txt
+*.key
+
+# 但保留示例文件
+!example.json

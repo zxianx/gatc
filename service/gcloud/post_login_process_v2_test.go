@@ -2,12 +2,8 @@ package gcloud
 
 import (
 	"fmt"
-	"gatc/base/zlog"
-	"gatc/conf"
 	"gatc/dao"
-	"gatc/env"
-	"gatc/helpers"
-	"os"
+	"gatc/test_common"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -15,43 +11,7 @@ import (
 
 // TestMain 在所有测试运行前统一初始化（推荐方案）
 func TestMain(m *testing.M) {
-	// 初始化环境
-	if err := env.Init(); err != nil {
-		panic("Failed to init env: " + err.Error())
-	}
-
-	// 使用测试配置路径
-	confPath := "../../conf"
-	if env.DevLocalEnv {
-		confPath += "/dev"
-	}
-
-	// 加载配置
-	conf.LoadAppConfig(confPath + "/conf.yaml")
-	conf.LoadResourceConf(confPath + "/resource.yaml")
-	zlog.InitLogger(conf.AppConf.LogConf)
-
-	// 初始化数据库
-	helpers.InitMysql()
-
-	// 初始化数据库表
-	if err := helpers.GatcDbClient.AutoMigrate(
-		&dao.VMInstance{},
-		&dao.GCPAccount{},
-	); err != nil {
-		panic("Failed to migrate database: " + err.Error())
-	}
-
-	// 设置gin为测试模式
-	gin.SetMode(gin.TestMode)
-
-	// 运行测试
-	code := m.Run()
-
-	// 测试清理（可选）
-	// 这里可以添加清理逻辑
-
-	os.Exit(code)
+	test_common.Test_main_init(m)
 }
 
 // 轻量级测试初始化函数（TestMain已初始化大部分依赖）

@@ -31,6 +31,7 @@ func getHTTPClient() *http.Client {
 		globalClient = &http.Client{
 			Timeout: 150 * time.Second, // 适应30-120s的请求时间
 			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
 				// 连接池配置
 				MaxIdleConns:        100,              // 最大空闲连接数
 				MaxIdleConnsPerHost: 20,               // 每个host最大空闲连接
@@ -53,7 +54,7 @@ func getHTTPClient() *http.Client {
 func getConfig() *Config {
 	config := &Config{
 		Port:       1081,
-		ForceHTTPS: true,
+		ForceHTTPS: false,
 	}
 
 	if portStr := os.Getenv("HttpServerProxyPort"); portStr != "" {
@@ -62,8 +63,8 @@ func getConfig() *Config {
 		}
 	}
 
-	if forceHTTPS := os.Getenv("force_https"); forceHTTPS == "false" {
-		config.ForceHTTPS = false
+	if forceHTTPS := os.Getenv("force_https"); forceHTTPS == "true" {
+		config.ForceHTTPS = true
 	}
 
 	if whiteList := os.Getenv("proxy_url_keyword_white_list"); whiteList != "" {
@@ -72,6 +73,7 @@ func getConfig() *Config {
 			config.URLKeywordWhiteList = append(config.URLKeywordWhiteList, strings.ToLower(s))
 		}
 	}
+	config.URLKeywordWhiteList = append(config.URLKeywordWhiteList, "ifconfig") //ifconfig.me 方便看代理是否生效
 
 	if delHeaders := os.Getenv("proxy_del_headers"); delHeaders != "" {
 		config.DelHeaders = strings.Split(delHeaders, "|")
@@ -111,6 +113,12 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	targetURL, err := url.QueryUnescape(path)
 	if err != nil {
 		http.Error(w, "Invalid URL encoding", http.StatusBadRequest)
+		return
+	}
+
+	// 检查是否是Gemini批处理请求
+	if r.Header.Get("X-Gemini-Batch") == "1" && strings.Contains(targetURL, "v1beta/models/gemini") {
+		c.handleBatchRequest(w, r, targetURL)
 		return
 	}
 
@@ -187,6 +195,53 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed to copy response body: %v", err)
 	}
+}
+
+// 处理批处理请求
+func (c *Config) handleBatchRequest(w http.ResponseWriter, r *http.Request, targetURL string) {
+	// 统一使用Gemini批处理端点
+	batchURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:batchGenerateContent"
+
+	// 读取请求体
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	// 复制请求头并去除不需要的头
+	header := r.Header.Clone()
+	header.Del("X-Gemini-Batch")
+	header.Del("Host") // Go会自动设置正确的Host头
+
+	// 应用DelHeaders配置
+	c.removeHeaders(header)
+
+	// 添加到批处理管理器（使用统一的批处理端点）
+	resultChan := batchManager.addToBatch(batchURL, header, body)
+
+	//w.WriteHeader(200)
+	//w.Write([]byte("debug , Request added to batch"))
+	//return
+
+	// 等待批处理结果
+	result := <-resultChan
+
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 复制响应头（Go会自动处理Content-Length等）
+	for name, values := range result.Header {
+		for _, value := range values {
+			w.Header().Add(name, value)
+		}
+	}
+
+	// 返回结果
+	w.WriteHeader(result.StatusCode)
+	w.Write(result.Body)
 }
 
 func main() {

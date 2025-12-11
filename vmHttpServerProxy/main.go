@@ -200,7 +200,7 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 // 处理批处理请求
 func (c *Config) handleBatchRequest(w http.ResponseWriter, r *http.Request, targetURL string) {
 	// 统一使用Gemini批处理端点
-	batchURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:batchGenerateContent"
+	batchURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:batchGenerateContent"
 
 	// 读取请求体
 	body, err := io.ReadAll(r.Body)

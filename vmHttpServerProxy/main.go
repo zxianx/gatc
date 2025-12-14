@@ -109,11 +109,17 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targetURL := path
 	// 解码URL
-	targetURL, err := url.QueryUnescape(path)
-	if err != nil {
-		http.Error(w, "Invalid URL encoding", http.StatusBadRequest)
-		return
+	if len(path) > 8 {
+		if !(path[:7] == "http://" || path[:8] == "https://") {
+			var err error
+			targetURL, err = url.QueryUnescape(path)
+			if err != nil {
+				http.Error(w, "Invalid URL encoding", http.StatusBadRequest)
+				return
+			}
+		}
 	}
 
 	// 检查是否是Gemini批处理请求

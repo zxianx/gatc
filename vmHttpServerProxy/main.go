@@ -103,24 +103,13 @@ func (c *Config) removeHeaders(header http.Header) {
 
 func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	// 提取路径中的目标URL
-	path := strings.TrimPrefix(r.URL.Path, "/px/")
-	if path == "" || path == r.URL.Path {
-		http.Error(w, "Invalid proxy path. Use /px/{url}", http.StatusBadRequest)
-		return
-	}
+	path := strings.TrimPrefix(r.RequestURI, "/px/")
 
 	targetURL := path
-	// 解码URL
-	if len(path) > 8 {
-		if !(path[:7] == "http://" || path[:8] == "https://") {
-			var err error
-			targetURL, err = url.QueryUnescape(path)
-			if err != nil {
-				http.Error(w, "Invalid URL encoding", http.StatusBadRequest)
-				return
-			}
-		}
-	}
+	targetURL = strings.Replace(targetURL, "%3A%2F%2F", "://", 1)
+	//fmt.Println(r.RequestURI)
+	//fmt.Println(path)
+	//fmt.Println(targetURL)
 
 	// 检查是否是Gemini批处理请求
 	if r.Header.Get("X-Gemini-Batch") == "1" && strings.Contains(targetURL, "v1beta/models/gemini") {

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +41,7 @@ type CreateVMResult struct {
 	ExternalIP    string `json:"external_ip"`
 	Proxy         string `json:"proxy"`
 	SSHConnection string `json:"ssh_connection"`
+	Msg           string `json:"msg"`
 }
 
 // DeleteVMParam 删除VM输入参数
@@ -51,6 +53,7 @@ type DeleteVMParam struct {
 type DeleteVMResult struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+	VMID    string `json:"vm_id"`
 }
 
 // ListVMParam 查询VM列表输入参数
@@ -88,6 +91,34 @@ type RefreshVMIPResult struct {
 	VMID       string `json:"vm_id"`
 	ExternalIP string `json:"external_ip"`
 	Updated    bool   `json:"updated"`
+}
+
+type BatchCreateVMParam struct {
+	Num         int    `json:"num"`
+	Zone        string `json:"zone,omitempty"`
+	MachineType string `json:"machine_type,omitempty"`
+	Tag         string `json:"tag,omitempty"`
+	ProxyType   string `json:"proxy_type,omitempty"`
+}
+
+type BatchCreateVMResult struct {
+	Total   int              `json:"total"`
+	Success int              `json:"success"`
+	Failed  int              `json:"failed"`
+	Results []CreateVMResult `json:"results"`
+}
+
+type BatchDeleteVMParam struct {
+	VMList []string `json:"vm_list,omitempty"`
+	Prefix string   `json:"prefix,omitempty"` // 优先vm_list参数，其次prefix
+	Limit  int      `json:"limit,omitempty"`  //只 针对prefix 参数有效
+}
+
+type BatchDeleteVMResult struct {
+	Total   int              `json:"total"`
+	Success int              `json:"success"`
+	Failed  int              `json:"failed"`
+	Results []DeleteVMResult `json:"results"`
 }
 
 type VMService struct{}
@@ -349,7 +380,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	if param.ProxyType != "" {
 		if param.ProxyType == constants.ProxyTypeTinyProxy {
 			proxyType = constants.ProxyTypeTinyProxy
-		} else if param.ProxyType == constants.ProxyTypeHttpProxy || param.ProxyType == "service" {
+		} else if param.ProxyType == constants.ProxyTypeHttpProxy || param.ProxyType == constants.ProxyTypeHttpProxyAlias {
 			proxyType = constants.ProxyTypeHttpProxy
 		}
 	}
@@ -370,7 +401,7 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	}
 
 	projectID := gcpConfig.GetProjectID()
-	vmName := fmt.Sprintf("gatcvm-%s-%s-%s", strings.ToLower(proxyType), strings.ToLower(param.Tag), time.Now().Format("20060102150405"))
+	vmName := fmt.Sprintf("gatcvm-%s-%s-%s", strings.ToLower(proxyType), strings.ToLower(param.Tag), time.Now().Format("0102150405"))
 
 	// 生成代理的用户名和密码
 	proxyUsername, proxyPassword := generateProxyCredentials()
@@ -499,11 +530,13 @@ func (s *VMService) DeleteVM(c *gin.Context, param *DeleteVMParam) (*DeleteVMRes
 			return &DeleteVMResult{
 				Success: false,
 				Message: "VM not found",
+				VMID:    param.VMID,
 			}, fmt.Errorf("VM not found")
 		}
 		return &DeleteVMResult{
 			Success: false,
 			Message: "Failed to query VM",
+			VMID:    param.VMID,
 		}, fmt.Errorf("failed to query VM: %v", err)
 	}
 
@@ -526,12 +559,14 @@ func (s *VMService) DeleteVM(c *gin.Context, param *DeleteVMParam) (*DeleteVMRes
 		return &DeleteVMResult{
 			Success: false,
 			Message: "Failed to update VM status",
+			VMID:    param.VMID,
 		}, fmt.Errorf("failed to update VM status: %v", err)
 	}
 
 	return &DeleteVMResult{
 		Success: true,
 		Message: "VM deleted successfully",
+		VMID:    param.VMID,
 	}, nil
 }
 
@@ -704,22 +739,152 @@ func (s *VMService) getGCPVMInstances(c *gin.Context) ([]GCPVMInstance, error) {
 }
 
 // SyncVMsWithGCP VM信息同步到数据库的定时任务
+func (s *VMService) BatchCreateVM(c *gin.Context, param *BatchCreateVMParam) (*BatchCreateVMResult, error) {
+	if param.Num <= 0 {
+		return nil, fmt.Errorf("num must be greater than 0")
+	}
+	if param.Num > 100 {
+		return nil, fmt.Errorf("num cannot exceed 100")
+	}
+
+	proxyType := constants.ProxyTypeSocks5
+	if param.ProxyType != "" {
+		if param.ProxyType == constants.ProxyTypeTinyProxy {
+			proxyType = constants.ProxyTypeTinyProxy
+		} else if param.ProxyType == constants.ProxyTypeHttpProxy || param.ProxyType == constants.ProxyTypeHttpProxyAlias {
+			proxyType = constants.ProxyTypeHttpProxy
+		}
+	}
+
+	prefix := fmt.Sprintf("gatcvm-%s-%s-", strings.ToLower(proxyType), strings.ToLower(param.Tag))
+
+	existingVMs, err := dao.GVmInstanceDao.GetByPrefix(c, prefix, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing VMs: %v", err)
+	}
+	if len(existingVMs) > 0 {
+		return nil, fmt.Errorf("请勿重复创建或更改tag重试")
+	}
+
+	result := &BatchCreateVMResult{
+		Total:   param.Num,
+		Results: make([]CreateVMResult, param.Num),
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i := 0; i < param.Num; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+
+			createParam := &CreateVMParam{
+				Zone:        param.Zone,
+				MachineType: param.MachineType,
+				Tag:         param.Tag + "-" + strconv.Itoa(i),
+				ProxyType:   param.ProxyType,
+			}
+
+			vmResult, err := s.CreateVM(c, createParam)
+
+			mu.Lock()
+			if err != nil {
+				zlog.ErrorWithCtx(c, "Batch create VM failed", err)
+				result.Failed++
+				result.Results[index] = CreateVMResult{}
+			} else {
+				result.Success++
+				result.Results[index] = *vmResult
+			}
+			mu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	zlog.InfoWithCtx(c, "Batch create VMs completed", "total", result.Total, "success", result.Success, "failed", result.Failed)
+	return result, nil
+}
+
+func (s *VMService) BatchDeleteVM(c *gin.Context, param *BatchDeleteVMParam) (*BatchDeleteVMResult, error) {
+	var vmIDs []string
+
+	if len(param.VMList) > 0 {
+		vmIDs = param.VMList
+	} else if param.Prefix != "" {
+		limit := param.Limit
+		if limit <= 0 {
+			limit = 1000
+		}
+
+		vms, err := dao.GVmInstanceDao.GetByPrefix(c, param.Prefix, limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query VMs by prefix: %v", err)
+		}
+
+		for _, vm := range vms {
+			vmIDs = append(vmIDs, vm.VMID)
+		}
+	} else {
+		return nil, fmt.Errorf("either vm_list or prefix must be provided")
+	}
+
+	if len(vmIDs) == 0 {
+		return &BatchDeleteVMResult{Total: 0, Success: 0, Failed: 0, Results: []DeleteVMResult{}}, nil
+	}
+
+	result := &BatchDeleteVMResult{
+		Total:   len(vmIDs),
+		Results: make([]DeleteVMResult, len(vmIDs)),
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for i, vmID := range vmIDs {
+		wg.Add(1)
+		go func(index int, id string) {
+			defer wg.Done()
+
+			deleteParam := &DeleteVMParam{VMID: id}
+			deleteResult, err := s.DeleteVM(c, deleteParam)
+
+			mu.Lock()
+			if err != nil {
+				zlog.ErrorWithCtx(c, "Batch delete VM failed", err)
+				result.Failed++
+				result.Results[index] = DeleteVMResult{Success: false, Message: err.Error(), VMID: vmID}
+			} else {
+				result.Success++
+				result.Results[index] = *deleteResult
+			}
+			mu.Unlock()
+		}(i, vmID)
+	}
+
+	wg.Wait()
+
+	zlog.InfoWithCtx(c, "Batch delete VMs completed", "total", result.Total, "success", result.Success, "failed", result.Failed)
+	return result, nil
+}
+
 func (s *VMService) SyncVMsWithGCP() {
 	c := &gin.Context{}
 
-	zlog.InfoWithCtx(c, "Starting VM sync with GCP")
+	zlog.InfoWithCtx(c, "SyncVMsWithGCP Starting VM sync with GCP")
 
 	// 获取GCP中所有VM实例 (集合A)
 	gcpInstances, err := s.getGCPVMInstances(c)
 	if err != nil {
-		zlog.ErrorWithCtx(c, "Failed to get GCP VM instances during sync", err)
+		zlog.ErrorWithCtx(c, "SyncVMsWithGCP Failed to get GCP VM instances during sync", err)
 		return
 	}
 
 	// 获取数据库中非已删除的记录 (集合B)
 	dbInstances, err := dao.GVmInstanceDao.GetActiveVMs(c)
 	if err != nil {
-		zlog.ErrorWithCtx(c, "Failed to get active VM instances from DB during sync", err)
+		zlog.ErrorWithCtx(c, "SyncVMsWithGCP Failed to get active VM instances from DB during sync", err)
 		return
 	}
 
@@ -749,9 +914,9 @@ func (s *VMService) SyncVMsWithGCP() {
 
 	if len(toDeleteVMIDs) > 0 {
 		if err := dao.GVmInstanceDao.BatchUpdateStatusDeleted(c, toDeleteVMIDs); err != nil {
-			zlog.ErrorWithCtx(c, "Failed to batch delete VMs during sync", err)
+			zlog.ErrorWithCtx(c, "SyncVMsWithGCP Failed to batch delete VMs during sync", err)
 		} else {
-			zlog.InfoWithCtx(c, "Marked VMs as deleted during sync", "count", len(toDeleteVMIDs), "vmIds", toDeleteVMIDs)
+			zlog.InfoWithCtx(c, "SyncVMsWithGCP Marked VMs as deleted during sync", "count", len(toDeleteVMIDs), "vmIds", toDeleteVMIDs)
 		}
 	}
 
@@ -780,17 +945,17 @@ func (s *VMService) SyncVMsWithGCP() {
 	successCount := 0
 	for _, vm := range toInsertVMs {
 		if err := dao.GVmInstanceDao.Create(c, vm); err != nil {
-			zlog.ErrorWithCtx(c, "Failed to insert VM during sync", err)
+			zlog.ErrorWithCtx(c, "SyncVMsWithGCP Failed to insert VM during sync", err)
 		} else {
 			successCount++
 		}
 	}
 
 	if len(toInsertVMs) > 0 {
-		zlog.InfoWithCtx(c, "Inserted new GATC VMs during sync", "attempted", len(toInsertVMs), "success", successCount)
+		zlog.InfoWithCtx(c, "SyncVMsWithGCP Inserted new GATC VMs during sync", "attempted", len(toInsertVMs), "success", successCount)
 	}
 
-	zlog.InfoWithCtx(c, "GATC VM sync with GCP completed",
+	zlog.InfoWithCtx(c, "SyncVMsWithGCP GATC VM sync with GCP completed",
 		"totalGCPVMs", len(gcpInstances),
 		"gatcGCPVMs", len(gcpVMIds),
 		"totalDBVMs", len(dbInstances),

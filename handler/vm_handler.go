@@ -10,12 +10,13 @@ import (
 
 // CreateVMRequest 创建VM请求结构
 type CreateVMRequest struct {
-	service.CreateVMParam
+	service.BatchCreateVMParam
 }
 
-// DeleteVMRequest 删除VM请求结构  
+// DeleteVMRequest 删除VM请求结构
 type DeleteVMRequest struct {
 	service.DeleteVMParam
+	service.BatchDeleteVMParam
 }
 
 // ListVMRequest 查询VM列表请求结构
@@ -50,13 +51,28 @@ func (h *VMHandler) CreateVM(c *gin.Context) {
 		return
 	}
 
-	result, err := h.vmService.CreateVM(c, &req.CreateVMParam)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
-		return
+	if req.Num > 1 {
+		batchParam := &req.BatchCreateVMParam
+		result, err := h.vmService.BatchCreateVM(c, batchParam)
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.Success(c, result)
+	} else {
+		createParam := &service.CreateVMParam{
+			Zone:        req.Zone,
+			MachineType: req.MachineType,
+			Tag:         req.Tag,
+			ProxyType:   req.ProxyType,
+		}
+		result, err := h.vmService.CreateVM(c, createParam)
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.Success(c, result)
 	}
-
-	response.Success(c, result)
 }
 
 func (h *VMHandler) DeleteVM(c *gin.Context) {
@@ -66,13 +82,23 @@ func (h *VMHandler) DeleteVM(c *gin.Context) {
 		return
 	}
 
-	result, err := h.vmService.DeleteVM(c, &req.DeleteVMParam)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
-		return
+	if req.DeleteVMParam.VMID != "" {
+		deleteParam := &req.DeleteVMParam
+		result, err := h.vmService.DeleteVM(c, deleteParam)
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.Success(c, result)
+	} else {
+		batchParam := &req.BatchDeleteVMParam
+		result, err := h.vmService.BatchDeleteVM(c, batchParam)
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.Success(c, result)
 	}
-
-	response.Success(c, result)
 }
 
 func (h *VMHandler) ListVMs(c *gin.Context) {

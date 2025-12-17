@@ -1,3 +1,4 @@
+# docker compose -f docker-compose.gatc.prod.yml up -d
 version: '3.8'
 
 services:
@@ -8,6 +9,7 @@ services:
       - "8401:5401"
     environment:
       - DEV_LOCAL_ENV=false
+      - CLEAN_OLD_VM_EXIST_EXCEED_H=72
     volumes:
       - /opt/gatc/conf:/app/conf:ro
     restart: unless-stopped

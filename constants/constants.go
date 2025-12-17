@@ -23,4 +23,5 @@ const (
 	ProxyTypeSocks5       = "socks5"
 	ProxyTypeTinyProxy    = "tinyproxy"
 	ProxyTypeHttpProxy    = "httpProxyServer"
+	ProxyTypeHttpProxyAlias = "service"
 )

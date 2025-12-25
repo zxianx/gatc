@@ -413,6 +413,7 @@ func generateTokenForProject(workCtx *WorkCtx, projectID string) (bool, string) 
 		"serviceusage.googleapis.com",
 		"apikeys.googleapis.com",
 		"generativelanguage.googleapis.com",
+		"customsearch.googleapis.com",
 	}
 
 	for _, service := range services {

@@ -2,7 +2,6 @@ package gcloud
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"gatc/base/zlog"
 	"gatc/constants"
@@ -351,127 +350,6 @@ func (ctx *ProjectProcessCtx) enableBillingForProject(projectID string) error {
 	}
 
 	return nil
-}
-
-// createGeminiTokens 为新绑卡项目创建Gemini API Token
-func (ctx *ProjectProcessCtx) createGeminiTokens() error {
-	// 获取新绑卡但还没有token的项目
-	projects, err := dao.GGcpAccountDao.GetBoundProjectsWithoutToken(ctx.baseCtx.GinCtx, ctx.baseCtx.Email)
-	if err != nil {
-		return fmt.Errorf("failed to get projects without token: %v", err)
-	}
-
-	zlog.InfoWithCtx(ctx.baseCtx.GinCtx, "开始为项目创建Gemini Token", "项目数", len(projects))
-
-	for _, project := range projects {
-		token, err := ctx.createGeminiTokenForProject(project.ProjectID)
-		if err != nil {
-			zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, "创建Gemini Token失败", fmt.Errorf("项目: %s, 错误: %v", project.ProjectID, err))
-			continue
-		}
-
-		// 更新数据库中的token
-		project.OfficialToken = token
-		project.UpdatedAt = time.Now()
-
-		if err := dao.GGcpAccountDao.Save(ctx.baseCtx.GinCtx, &project); err != nil {
-			zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, "保存Gemini Token失败", err)
-			continue
-		}
-
-		zlog.InfoWithCtx(ctx.baseCtx.GinCtx, "Gemini Token创建成功", "项目ID", project.ProjectID)
-	}
-
-	return nil
-}
-
-// createGeminiTokenForProject 为单个项目创建Gemini API Token
-func (ctx *ProjectProcessCtx) createGeminiTokenForProject(projectID string) (string, error) {
-	// 1. 启用必要的API
-	services := []string{
-		"apikeys.googleapis.com",
-		"generativelanguage.googleapis.com",
-	}
-
-	for _, service := range services {
-		enableCmd := exec.Command(
-			"ssh",
-			"-i", constants.SSHKeyPath,
-			"-o", "StrictHostKeyChecking=no",
-			"-o", "UserKnownHostsFile=/dev/null",
-			fmt.Sprintf("%s@%s", ctx.baseCtx.VMInstance.SSHUser, ctx.baseCtx.VMInstance.ExternalIP),
-			fmt.Sprintf("gcloud services enable %s --project=%s", service, projectID),
-		)
-
-		if _, err := enableCmd.CombinedOutput(); err != nil {
-			zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, fmt.Sprintf("启用服务失败: %s, 项目: %s", service, projectID), err)
-		}
-	}
-
-	// 等待服务启用生效
-	time.Sleep(10 * time.Second)
-
-	// 2. 创建API Key
-	createKeyCmd := exec.Command(
-		"ssh",
-		"-i", constants.SSHKeyPath,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("%s@%s", ctx.baseCtx.VMInstance.SSHUser, ctx.baseCtx.VMInstance.ExternalIP),
-		fmt.Sprintf("gcloud services api-keys create --project=%s --display-name='Gemini API Key' --api-target=service=generativelanguage.googleapis.com --format=json", projectID),
-	)
-
-	createOutput, err := createKeyCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to create API key: %v, output: %s", err, string(createOutput))
-	}
-
-	// 3. 解析创建结果，提取key name
-	var keyResponse struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(createOutput, &keyResponse); err != nil {
-		return "", fmt.Errorf("failed to parse API key creation response: %v", err)
-	}
-
-	if keyResponse.Name == "" {
-		return "", fmt.Errorf("API key name is empty in response")
-	}
-
-	// 4. 获取API key的实际token
-	getKeyCmd := exec.Command(
-		"ssh",
-		"-i", constants.SSHKeyPath,
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		fmt.Sprintf("%s@%s", ctx.baseCtx.VMInstance.SSHUser, ctx.baseCtx.VMInstance.ExternalIP),
-		fmt.Sprintf("gcloud services api-keys get-key-string %s --project=%s", keyResponse.Name, projectID),
-	)
-
-	keyOutput, err := getKeyCmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to get API key string: %v, output: %s", err, string(keyOutput))
-	}
-
-	apiKey := strings.TrimSpace(string(keyOutput))
-	if !strings.HasPrefix(apiKey, "AIza") {
-		return "", fmt.Errorf("invalid API key format: %s", apiKey)
-	}
-
-	// 5. 插入official_tokens表
-	tokenId, err := ctx.insertOfficialToken(projectID, apiKey)
-	if err != nil {
-		zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, fmt.Sprintf("插入official_tokens表失败, 项目: %s", projectID), err)
-		// 不返回错误，因为API key已经创建成功
-	} else {
-		// 6. 更新gcp_accounts的official_token_id
-		if err := ctx.updateOfficialTokenId(projectID, tokenId); err != nil {
-			zlog.ErrorWithCtx(ctx.baseCtx.GinCtx, fmt.Sprintf("更新official_token_id失败, 项目: %s", projectID), err)
-		}
-	}
-
-	zlog.InfoWithCtx(ctx.baseCtx.GinCtx, "成功创建API Key", "项目ID", projectID, "token前缀", apiKey[:10]+"...")
-	return apiKey, nil
 }
 
 // checkProjectBillingStatus 检查项目的billing状态

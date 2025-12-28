@@ -2,11 +2,11 @@ package constants
 
 const (
 	// GCP配置
-	WhiteAccountKeyPath   = "./conf/gcp/sa-key0.json"
-	DefaultZone           = "us-central1-a"
-	DefaultMachineType    = "e2-small"
-	MaxProjectsPerAccount = 12
-	VMInitScriptPath      = "./scripts/vm_init.sh"
+	WhiteAccountKeyPath       = "./conf/gcp/sa-key0.json"
+	DefaultZone               = "us-central1-a"
+	DefaultMachineType        = "e2-small"
+	MaxProjectsPerAccount     = 12
+	VMInitScriptPath          = "./scripts/vm_init.sh"
 	VMInitScriptTinyProxyPath = "./scripts/vm_init_tinyproxy.sh"
 	VMInitScriptHttpProxyPath = "./scripts/vm_init_httpproxy.sh"
 
@@ -18,10 +18,10 @@ const (
 	VMStatusRunning = 1
 	VMStatusStopped = 2
 	VMStatusDeleted = 3
-	
+
 	// 代理类型
-	ProxyTypeSocks5       = "socks5"
-	ProxyTypeTinyProxy    = "tinyproxy"
-	ProxyTypeHttpProxy    = "httpProxyServer"
-	ProxyTypeHttpProxyAlias = "service"
+	ProxyTypeSocks5         = "socks5"
+	ProxyTypeTinyProxy      = "tinyproxy"
+	ProxyTypeHttpProxy      = "httpProxyServer"
+	ProxyTypeHttpProxyAlias = "server"
 )

@@ -137,7 +137,7 @@ func (s *VMService) isGATCVM(vmName string) bool {
 func (s *VMService) CleanupOldVMs() {
 	// 防止并发执行
 	if !cleanupRunning.CompareAndSwap(false, true) {
-		zlog.Info("VM cleanup already running, skipping this execution")
+		zlog.Info("CleanupOldVMs VM cleanup already running, skipping this execution")
 		return
 	}
 	defer cleanupRunning.Store(false)
@@ -147,7 +147,7 @@ func (s *VMService) CleanupOldVMs() {
 	// 每小时清理24小时前的VM
 	existH := os.Getenv("CLEAN_OLD_VM_EXIST_EXCEED_H")
 	if existH == "" {
-		zlog.InfoWithCtx(c, "SKIP. Starting cleanup of old VMs")
+		zlog.InfoWithCtx(c, "CleanupOldVMs SKIP. Starting cleanup of old VMs")
 		return
 	}
 	h, err2 := strconv.Atoi(existH)
@@ -156,19 +156,19 @@ func (s *VMService) CleanupOldVMs() {
 		return
 	}
 
-	zlog.InfoWithCtx(c, "Starting cleanup of old VMs, ", h)
+	zlog.InfoWithCtx(c, "CleanupOldVMs Starting cleanup of old VMs, ", h)
 
 	// 获取24小时前创建的VM
 	cutoffTime := time.Now().Add(-time.Duration(h) * time.Hour)
 
 	vms, err := dao.GVmInstanceDao.GetVMsCreatedBefore(c, cutoffTime)
 	if err != nil {
-		zlog.ErrorWithCtx(c, "Failed to get old VMs", err)
+		zlog.ErrorWithCtx(c, "CleanupOldVMs Failed to get old VMs", err)
 		return
 	}
 
 	if len(vms) == 0 {
-		zlog.InfoWithCtx(c, "No old VMs to cleanup")
+		zlog.InfoWithCtx(c, "CleanupOldVMs No old VMs to cleanup")
 		return
 	}
 
@@ -176,27 +176,27 @@ func (s *VMService) CleanupOldVMs() {
 	for _, vm := range vms {
 		// 只处理GATC创建的VM
 		if !s.isGATCVM(vm.VMID) {
-			zlog.InfoWithCtx(c, "Skipping non-GATC VM during cleanup", "vmId", vm.VMID)
+			zlog.InfoWithCtx(c, "CleanupOldVMs Skipping non-GATC VM during cleanup", "vmId", vm.VMID)
 			continue
 		}
 
 		// 删除GCP中的VM实例
 		if err := s.deleteVMFromGCP(c, &vm); err != nil {
-			zlog.ErrorWithCtx(c, "Failed to delete VM from GCP", err)
+			zlog.ErrorWithCtx(c, "CleanupOldVMs Failed to delete VM from GCP", err)
 			continue
 		}
 
 		// 更新数据库状态
 		if err := dao.GVmInstanceDao.UpdateStatus(c, vm.VMID, constants.VMStatusDeleted); err != nil {
-			zlog.ErrorWithCtx(c, "Failed to update VM status", err)
+			zlog.ErrorWithCtx(c, "CleanupOldVMs Failed to update VM status", err)
 			continue
 		}
 
 		successCount++
-		zlog.InfoWithCtx(c, "Deleted old VM", "vmId", vm.VMID)
+		zlog.InfoWithCtx(c, "CleanupOldVMs Deleted old VM", "vmId", vm.VMID)
 	}
 
-	zlog.InfoWithCtx(c, "Cleanup of old VMs completed", "processed", successCount)
+	zlog.InfoWithCtx(c, "CleanupOldVMs Cleanup of old VMs completed", "processed", successCount)
 }
 
 // deleteVMFromGCP 从GCP中删除VM实例
@@ -904,8 +904,9 @@ func (s *VMService) SyncVMsWithGCP() {
 		}
 	}
 
-	// B-A: 数据库中有但GCP中没有的GATC VM，设置为删除状态
 	var toDeleteVMIDs []string
+	/*  移除删除sync 删db的逻辑， 获取getGCPVMInstances 可能异常
+	// B-A: 数据库中有但GCP中没有的GATC VM，设置为删除状态
 	for ID := range dbVMIds {
 		if _, exists := gcpVMIds[ID]; !exists {
 			toDeleteVMIDs = append(toDeleteVMIDs, ID)
@@ -919,6 +920,7 @@ func (s *VMService) SyncVMsWithGCP() {
 			zlog.InfoWithCtx(c, "SyncVMsWithGCP Marked VMs as deleted during sync", "count", len(toDeleteVMIDs), "vmIds", toDeleteVMIDs)
 		}
 	}
+	*/
 
 	// A-B: GCP中有但数据库中没有的GATC VM，插入到数据库
 	var toInsertVMs []*dao.VMInstance

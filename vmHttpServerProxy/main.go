@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strconv"
@@ -15,10 +20,17 @@ import (
 
 type Config struct {
 	Port                int
-	ForceHTTPS          bool
 	URLKeywordWhiteList []string
 	DelHeaders          []string
+
+	ResetHost   bool // true
+	ClientReuse bool // true
+	ForceHTTPS  bool // false
+	Debug       bool // false
+	AutoFollow  bool // true,
 }
+
+var Cfg Config
 
 var (
 	globalClient *http.Client
@@ -47,39 +59,91 @@ func getHTTPClient() *http.Client {
 				ExpectContinueTimeout: 10 * time.Second,  // 100-continue超时
 			},
 		}
+		if !Cfg.AutoFollow {
+			globalClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		}
 	})
 	return globalClient
 }
 
-func getConfig() *Config {
-	config := &Config{
+func getConnectToHTTPClientExt(connect_to string, sni string) *http.Client {
+	// 有connect_to时，不使用连接池
+	if connect_to != "" {
+		client := &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				Proxy: nil,
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					// addr 是原始 host:port，但我们强制连 connectTo
+					return net.DialTimeout(network, connect_to, 10*time.Second)
+				},
+				DisableKeepAlives: true,
+				TLSClientConfig: &tls.Config{
+					ServerName: sni,
+				},
+			},
+		}
+		if !Cfg.AutoFollow {
+			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		}
+		return client
+	}
+	return getHTTPClient()
+}
+
+func initConfig() {
+	Cfg = Config{
 		Port:       1081,
 		ForceHTTPS: false,
+		Debug:      false,
 	}
 
 	if portStr := os.Getenv("HttpServerProxyPort"); portStr != "" {
 		if port, err := strconv.Atoi(portStr); err == nil {
-			config.Port = port
+			Cfg.Port = port
 		}
 	}
 
 	if forceHTTPS := os.Getenv("force_https"); forceHTTPS == "true" {
-		config.ForceHTTPS = true
+		Cfg.ForceHTTPS = true
+	}
+
+	if debug := os.Getenv("debug"); debug == "true" {
+		Cfg.Debug = true
+	}
+
+	Cfg.ResetHost = true
+	if ResetHost := os.Getenv("reset_host"); ResetHost == "false" {
+		Cfg.ResetHost = false
+	}
+
+	Cfg.ClientReuse = true
+	if ClientReuse := os.Getenv("client_reuse"); ClientReuse == "false" {
+		Cfg.ClientReuse = false
+	}
+
+	Cfg.AutoFollow = true
+	if AutoFollow := os.Getenv("auto_follow"); AutoFollow == "false" {
+		Cfg.AutoFollow = false
 	}
 
 	if whiteList := os.Getenv("proxy_url_keyword_white_list"); whiteList != "" {
 		tmp := strings.Split(whiteList, "|")
 		for _, s := range tmp {
-			config.URLKeywordWhiteList = append(config.URLKeywordWhiteList, strings.ToLower(s))
+			Cfg.URLKeywordWhiteList = append(Cfg.URLKeywordWhiteList, strings.ToLower(s))
 		}
 	}
-	config.URLKeywordWhiteList = append(config.URLKeywordWhiteList, "ifconfig") //ifconfig.me 方便看代理是否生效
+	Cfg.URLKeywordWhiteList = append(Cfg.URLKeywordWhiteList, "ifconfig") //ifconfig.me 方便看代理是否生效
 
 	if delHeaders := os.Getenv("proxy_del_headers"); delHeaders != "" {
-		config.DelHeaders = strings.Split(delHeaders, "|")
+		Cfg.DelHeaders = strings.Split(delHeaders, "|")
 	}
-
-	return config
+	cf, _ := json.Marshal(Cfg)
+	fmt.Println("Config: ", string(cf))
 }
 
 func (c *Config) isURLAllowed(targetURL string) bool {
@@ -102,6 +166,14 @@ func (c *Config) removeHeaders(header http.Header) {
 }
 
 func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
+
+	if c.Debug {
+		fmt.Println("HEADER HOST", r.Host)
+		for s, i := range r.Header {
+			fmt.Printf("HEADER %s: %s\n", s, i[0])
+		}
+	}
+
 	// 提取路径中的目标URL
 	path := strings.TrimPrefix(r.RequestURI, "/px/")
 
@@ -151,8 +223,13 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 设置正确的Host头
-	req.Header.Set("Host", target.Host)
-	req.Host = target.Host
+	if c.ResetHost {
+		req.Header.Set("Host", target.Host)
+		req.Host = target.Host
+	} else {
+		req.Host = r.Host
+		req.Header.Set("Host", r.Host)
+	}
 
 	// 删除指定的请求头
 	c.removeHeaders(req.Header)
@@ -161,10 +238,43 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	// req.Header.Set("Connection", "close")
 	// req.Close = true
 
-	// 使用全局HTTP客户端，启用连接池
-	client := getHTTPClient()
+	var client *http.Client
+	connectTo := r.Header.Get("X-Connect-To")
+	if connectTo != "" {
+		sni := target.Hostname()
+		// fmt.Printf("Connect-To: %s\n", connectTo)
+		client = getConnectToHTTPClientExt(connectTo, sni)
+	} else if !c.ClientReuse {
+		client = &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				DisableKeepAlives:     true,
+				DisableCompression:    false,             // 启用压缩
+				ResponseHeaderTimeout: 150 * time.Second, // 响应头超时
+				ExpectContinueTimeout: 10 * time.Second,  // 100-continue超时
+			},
+		}
+		if !c.AutoFollow {
+			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		}
+	} else {
+		client = getHTTPClient()
+	}
 
-	log.Printf("Proxying %s %s", r.Method, targetURL)
+	log.Printf("Proxying %s %s %s %s", r.Method, targetURL, req.Header.Get("Host"), req.Header.Get("User-Agent"))
+
+	var remoteAddr string
+	if c.Debug {
+		trace := &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) {
+				remoteAddr = info.Conn.RemoteAddr().String()
+			},
+		}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	}
 
 	// 发送请求
 	resp, err := client.Do(req)
@@ -181,6 +291,9 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(name, value)
 		}
 	}
+	if c.Debug && remoteAddr != "" {
+		w.Header().Set("X-Remote-Addr", remoteAddr)
+	}
 
 	// 设置状态码
 	w.WriteHeader(resp.StatusCode)
@@ -189,6 +302,41 @@ func (c *Config) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
 		log.Printf("Failed to copy response body: %v", err)
+	}
+}
+
+func main() {
+	initConfig()
+	config := Cfg
+
+	log.Printf("Starting HTTP Proxy Server on port %d", config.Port)
+	log.Printf("Force HTTPS: %v", config.ForceHTTPS)
+	log.Printf("URL Whitelist: %v", config.URLKeywordWhiteList)
+	log.Printf("Remove Headers: %v", config.DelHeaders)
+
+	http.HandleFunc("/px/", config.proxyHandler)
+
+	// 健康检查端点
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// 根路径说明
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/plain")
+			fmt.Fprintf(w, "HTTP Proxy Server\n\nUsage: /px/{url}\nExample: /px/https://api.anthropic.com/v1/messages\n")
+		} else {
+			http.NotFound(w, r)
+		}
+	})
+
+	addr := fmt.Sprintf(":%d", config.Port)
+	log.Printf("Server listening on %s", addr)
+
+	if err := http.ListenAndServe(addr, nil); err != nil {
+		log.Fatal("Failed to start server:", err)
 	}
 }
 
@@ -237,38 +385,4 @@ func (c *Config) handleBatchRequest(w http.ResponseWriter, r *http.Request, targ
 	// 返回结果
 	w.WriteHeader(result.StatusCode)
 	w.Write(result.Body)
-}
-
-func main() {
-	config := getConfig()
-
-	log.Printf("Starting HTTP Proxy Server on port %d", config.Port)
-	log.Printf("Force HTTPS: %v", config.ForceHTTPS)
-	log.Printf("URL Whitelist: %v", config.URLKeywordWhiteList)
-	log.Printf("Remove Headers: %v", config.DelHeaders)
-
-	http.HandleFunc("/px/", config.proxyHandler)
-
-	// 健康检查端点
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	// 根路径说明
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			w.Header().Set("Content-Type", "text/plain")
-			fmt.Fprintf(w, "HTTP Proxy Server\n\nUsage: /px/{url}\nExample: /px/https://api.anthropic.com/v1/messages\n")
-		} else {
-			http.NotFound(w, r)
-		}
-	})
-
-	addr := fmt.Sprintf(":%d", config.Port)
-	log.Printf("Server listening on %s", addr)
-
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		log.Fatal("Failed to start server:", err)
-	}
 }

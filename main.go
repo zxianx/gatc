@@ -98,6 +98,7 @@ func setupRoutes(r *gin.Engine) {
 			vm.GET("/list", vmHandler.ListVMs)
 			vm.GET("/get", vmHandler.GetVM)
 			vm.POST("/refresh-ip", vmHandler.RefreshVMIP)
+			vm.POST("/replace-proxy-resource", vmHandler.ReplaceProxyResource)
 		}
 
 		account := api.Group("/account")

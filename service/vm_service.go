@@ -965,3 +965,155 @@ func (s *VMService) SyncVMsWithGCP() {
 		"deleted", len(toDeleteVMIDs),
 		"inserted", successCount)
 }
+
+// ReplaceProxyResourceParam 替换代理资源参数
+type ReplaceProxyResourceParam struct {
+	BatchCreateVMParam
+}
+
+// ReplaceProxyResourceResult 替换代理资源结果
+type ReplaceProxyResourceResult struct {
+	NewVMsCreated      int      `json:"new_vms_created"`
+	NewProxiesAdded    int      `json:"new_proxies_added"`
+	OldProxiesDisabled int      `json:"old_proxies_disabled"`
+	TokensUpdated      int64    `json:"tokens_updated"`
+	OldVMsDeleted      int      `json:"old_vms_deleted"`
+	DeletedVMIDs       []string `json:"deleted_vm_ids"`
+	Message            string   `json:"message"`
+}
+
+// ReplaceProxyResource 替换代理资源
+func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyResourceParam) (*ReplaceProxyResourceResult, error) {
+	// 验证proxy_type必须是server或httpProxyServer
+	if param.ProxyType != constants.ProxyTypeHttpProxyAlias && param.ProxyType != constants.ProxyTypeHttpProxy {
+		return nil, fmt.Errorf("proxy_type必须是'server'或'httpProxyServer'，当前值: %s", param.ProxyType)
+	}
+
+	result := &ReplaceProxyResourceResult{}
+
+	// 步骤1: 创建新的VM（代理机）
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 1: Creating new VMs", "num", param.Num)
+	batchCreateResult, err := s.BatchCreateVM(c, &param.BatchCreateVMParam)
+	if err != nil {
+		return nil, fmt.Errorf("创建新VM失败: %v", err)
+	}
+	if batchCreateResult.Success == 0 {
+		return nil, fmt.Errorf("所有VM创建失败")
+	}
+	result.NewVMsCreated = batchCreateResult.Success
+	zlog.InfoWithCtx(c, "ReplaceProxyResource VMs created", "success", batchCreateResult.Success, "failed", batchCreateResult.Failed)
+
+	// 步骤2: 查询proxy_pool表，按created_at倒序limit num个（状态为active的）
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 2: Querying last batch proxies from proxy_pool")
+	lastBatchProxy, err := dao.GProxyPoolDao.GetLastBatchByType(c, constants.ProxyTypeHttpProxyAlias, dao.ProxyStatusActive, param.Num)
+	if err != nil {
+		return nil, fmt.Errorf("查询旧代理失败: %v", err)
+	}
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Found old proxies", "count", len(lastBatchProxy))
+
+	// 步骤3: 将新VM的代理插入proxy_pool表
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 3: Inserting new proxies to proxy_pool")
+	var newProxies []dao.ProxyPool
+	for _, vmResult := range batchCreateResult.Results {
+		// proxy格式: "http://35.208.147.190:1081" (不含/px后缀)
+		proxyURL := strings.TrimRight(vmResult.Proxy, "/px")
+		newProxies = append(newProxies, dao.ProxyPool{
+			Proxy:     proxyURL,
+			ProxyType: constants.ProxyTypeHttpProxyAlias,
+			Status:    dao.ProxyStatusActive,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		})
+	}
+
+	if len(newProxies) > 0 {
+		if err := dao.GProxyPoolDao.BatchCreate(c, newProxies); err != nil {
+			return nil, fmt.Errorf("插入新代理到proxy_pool失败: %v", err)
+		}
+		result.NewProxiesAdded = len(newProxies)
+		zlog.InfoWithCtx(c, "ReplaceProxyResource New proxies inserted", "count", len(newProxies))
+	}
+
+	// 步骤4: 建立新旧代理1:1映射
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 4: Building old-new proxy mapping")
+	replaceCount := len(lastBatchProxy)
+	if replaceCount > len(newProxies) {
+		replaceCount = len(newProxies)
+	}
+
+	toReplaceMap := make(map[string]string) // oldProxy -> newProxy
+	for i := 0; i < replaceCount; i++ {
+		toReplaceMap[lastBatchProxy[i].Proxy] = newProxies[i].Proxy
+	}
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Mapping created", "pairs", len(toReplaceMap))
+
+	// 步骤5: 替换official_tokens表中的base_url
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 5: Replacing base_url in official_tokens")
+	tokenDao := &dao.GormOfficialTokens{}
+	var totalTokensUpdated int64
+	for oldProxy, newProxy := range toReplaceMap {
+		affectedRows, err := tokenDao.ReplaceBaseURLProxy(c, oldProxy, newProxy)
+		if err != nil {
+			zlog.ErrorWithCtx(c, fmt.Sprintf("Failed to replace proxy in tokens, oldProxy=%s, newProxy=%s", oldProxy, newProxy), err)
+			continue
+		}
+		totalTokensUpdated += affectedRows
+		zlog.InfoWithCtx(c, "ReplaceProxyResource Replaced proxy in tokens", "oldProxy", oldProxy, "newProxy", newProxy, "affected", affectedRows)
+	}
+	result.TokensUpdated = totalTokensUpdated
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Total tokens updated", "count", totalTokensUpdated)
+
+	// 步骤6: 将lastBatchProxy的status置为0
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 6: Disabling old proxies")
+	var oldProxyIDs []int64
+	for _, proxy := range lastBatchProxy {
+		oldProxyIDs = append(oldProxyIDs, proxy.ID)
+	}
+	if len(oldProxyIDs) > 0 {
+		if err := dao.GProxyPoolDao.BatchUpdateStatus(c, oldProxyIDs, dao.ProxyStatusInactive); err != nil {
+			zlog.ErrorWithCtx(c, "Failed to disable old proxies", err)
+		} else {
+			result.OldProxiesDisabled = len(oldProxyIDs)
+			zlog.InfoWithCtx(c, "ReplaceProxyResource Old proxies disabled", "count", len(oldProxyIDs))
+		}
+	}
+
+	// 步骤7: 获取旧代理对应的VM ID
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 7: Finding old VMs to delete")
+	var toDelVMIDs []string
+	for _, oldProxy := range lastBatchProxy {
+		// 旧代理加/px后缀去vm_instance表查询
+		proxyWithSuffix := oldProxy.Proxy + "/px"
+		vmInstance, err := dao.GVmInstanceDao.GetByProxy(c, proxyWithSuffix)
+		if err != nil {
+			zlog.ErrorWithCtx(c, fmt.Sprintf("Failed to find VM by proxy: %s", proxyWithSuffix), err)
+			continue
+		}
+		if vmInstance != nil {
+			toDelVMIDs = append(toDelVMIDs, vmInstance.VMID)
+		}
+	}
+	zlog.InfoWithCtx(c, "ReplaceProxyResource VMs to delete", "count", len(toDelVMIDs))
+
+	// 步骤8: 删除旧VM
+	if len(toDelVMIDs) > 0 {
+		zlog.InfoWithCtx(c, "ReplaceProxyResource Step 8: Deleting old VMs")
+		batchDeleteParam := &BatchDeleteVMParam{
+			VMList: toDelVMIDs,
+		}
+		deleteResult, err := s.BatchDeleteVM(c, batchDeleteParam)
+		if err != nil {
+			zlog.ErrorWithCtx(c, "Failed to delete old VMs", err)
+		} else {
+			result.OldVMsDeleted = deleteResult.Success
+			result.DeletedVMIDs = toDelVMIDs
+			zlog.InfoWithCtx(c, "ReplaceProxyResource Old VMs deleted", "success", deleteResult.Success, "failed", deleteResult.Failed)
+		}
+	}
+
+	result.Message = fmt.Sprintf("代理资源替换完成: 新建VM %d个, 新增代理 %d个, 禁用旧代理 %d个, 更新Token %d个, 删除旧VM %d个",
+		result.NewVMsCreated, result.NewProxiesAdded, result.OldProxiesDisabled, result.TokensUpdated, result.OldVMsDeleted)
+
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Completed", "result", result)
+	return result, nil
+}

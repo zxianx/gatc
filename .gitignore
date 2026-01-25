@@ -11,3 +11,4 @@ gcp3999-2.sh
 tmp/
 vmHttpServerProxy/vm-http-proxy
 gemini-batch-test/
+vmHttpServerProxy/vm-http-proxy.log

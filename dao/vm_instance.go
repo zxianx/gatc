@@ -27,6 +27,8 @@ type VMInstance struct {
 	UpdatedAt     time.Time `json:"updated_at" gorm:"column:updated_at;index"`
 }
 
+// ProxyType  “server或httpProxyServer”（两者是同一种）的行， Proxy 格式类似 “http://35.208.147.190:1081/px”
+
 func (VMInstance) TableName() string {
 	return "vm_instances"
 }
@@ -197,3 +199,22 @@ func (d *VMInstanceDao) GetByPrefix(c *gin.Context, prefix string, limit int) ([
 	zlog.InfoWithCtx(c, "Found VMs by prefix", "count", len(vms))
 	return vms, nil
 }
+
+// GetByProxy 根据proxy字段查询VM实例
+func (d *VMInstanceDao) GetByProxy(c *gin.Context, proxy string) (*VMInstance, error) {
+	zlog.InfoWithCtx(c, "Querying VM instance by proxy", "proxy", proxy)
+
+	var vm VMInstance
+	err := helpers.GatcDbClient.Where("proxy = ?", proxy).First(&vm).Error
+	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil
+		}
+		zlog.ErrorWithCtx(c, "Failed to query VM by proxy", err)
+		return nil, err
+	}
+
+	zlog.InfoWithCtx(c, "VM instance found by proxy", "vmId", vm.VMID, "proxy", proxy)
+	return &vm, nil
+}
+

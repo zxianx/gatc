@@ -211,3 +211,27 @@ func (c *GormOfficialTokens) Updates(ctx *gin.Context, cond *GormOfficialTokens,
 	err = db.Table(c.TableName()).Updates(&c).Error
 	return
 }
+
+// ReplaceBaseURLProxy 替换base_url中的代理地址
+// oldProxy: 旧代理地址，不含/px后缀，如 "http://35.208.147.190:1081"
+// newProxy: 新代理地址，不含/px后缀，如 "http://35.208.147.191:1081"
+func (c *GormOfficialTokens) ReplaceBaseURLProxy(ctx *gin.Context, oldProxy, newProxy string) (affectedRows int64, err error) {
+	db := c.getDb()
+	if ctx != nil {
+		db = db.WithContext(ctx)
+	}
+
+	// 使用LIKE查询匹配包含旧代理地址的base_url
+	// base_url格式类似: "http://35.208.147.190:1081/px..."
+	likePattern := oldProxy + "%"
+
+	// 使用REPLACE函数替换base_url中的旧代理为新代理
+	result := db.Table(c.TableName()).
+		Where("base_url LIKE ?", likePattern).
+		Updates(map[string]interface{}{
+			"base_url":   gorm.Expr("REPLACE(base_url, ?, ?)", oldProxy, newProxy),
+			"updated_at": time.Now(),
+		})
+
+	return result.RowsAffected, result.Error
+}

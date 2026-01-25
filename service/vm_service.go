@@ -978,8 +978,7 @@ type ReplaceProxyResourceResult struct {
 	NewProxiesAdded    int                  `json:"new_proxies_added"`
 	OldProxiesDisabled int                  `json:"old_proxies_disabled"`
 	TokensUpdated      int64                `json:"tokens_updated"`
-	OldVMsDeleted      int                  `json:"old_vms_deleted"`
-	DeletedVMIDs       []string             `json:"deleted_vm_ids"`
+	AsyncDeletedVMIDs  []string             `json:"async_deleted_vm_ids"`
 	Message            string               `json:"message"`
 }
 
@@ -1103,18 +1102,20 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 		batchDeleteParam := &BatchDeleteVMParam{
 			VMList: toDelVMIDs,
 		}
-		deleteResult, err := s.BatchDeleteVM(c, batchDeleteParam)
-		if err != nil {
-			zlog.ErrorWithCtx(c, "Failed to delete old VMs", err)
-		} else {
-			result.OldVMsDeleted = deleteResult.Success
-			result.DeletedVMIDs = toDelVMIDs
-			zlog.InfoWithCtx(c, "ReplaceProxyResource Old VMs deleted", "success", deleteResult.Success, "failed", deleteResult.Failed)
-		}
-	}
+		result.AsyncDeletedVMIDs = toDelVMIDs
+		go func() {
+			time.Sleep(70 * time.Second)
+			deleteResult, err := s.BatchDeleteVM(c, batchDeleteParam)
+			if err != nil {
+				zlog.ErrorWithCtx(c, "Failed to delete old VMs", err)
+			} else {
+				zlog.InfoWithCtx(c, "ReplaceProxyResource Old VMs deleted", "success", deleteResult.Success, "failed", deleteResult.Failed)
+			}
+		}()
 
-	result.Message = fmt.Sprintf("代理资源替换完成: 新建VM %d个, 新增代理 %d个, 禁用旧代理 %d个, 更新Token %d个, 删除旧VM %d个",
-		result.NewVMsCreated, result.NewProxiesAdded, result.OldProxiesDisabled, result.TokensUpdated, result.OldVMsDeleted)
+	}
+	result.Message = fmt.Sprintf("代理资源替换完成: 新建VM %d个, 新增代理 %d个, 禁用旧代理 %d个, 更新Token %d个, 触发删除旧VM %d个",
+		result.NewVMsCreated, result.NewProxiesAdded, result.OldProxiesDisabled, result.TokensUpdated, len(result.AsyncDeletedVMIDs))
 
 	zlog.InfoWithCtx(c, "ReplaceProxyResource Completed", "result", result)
 	return result, nil

@@ -2,6 +2,7 @@ package dao
 
 import (
 	"gatc/base/zlog"
+	"gatc/constants"
 	"gatc/helpers"
 	"strings"
 	"time"
@@ -119,7 +120,7 @@ func (d *VMInstanceDao) Delete(c *gin.Context, vmID string) error {
 	zlog.InfoWithCtx(c, "Soft deleting VM instance", "vmId", vmID)
 	err := helpers.GatcDbClient.Model(&VMInstance{}).
 		Where("vm_id = ?", vmID).
-		Update("status", 3).Error // 3 = deleted
+		Update("status", constants.VMStatusDeleted).Error
 	if err != nil {
 		zlog.ErrorWithCtx(c, "Failed to soft delete VM", err)
 	} else {
@@ -133,7 +134,7 @@ func (d *VMInstanceDao) GetVMsCreatedBefore(c *gin.Context, cutoffTime time.Time
 	zlog.InfoWithCtx(c, "Querying VMs created before", "cutoffTime", cutoffTime)
 
 	var vms []VMInstance
-	err := helpers.GatcDbClient.Where("created_at < ? AND status != ?", cutoffTime, 3).Find(&vms).Error
+	err := helpers.GatcDbClient.Where("created_at < ? AND status != ?", cutoffTime, constants.VMStatusDeleted).Find(&vms).Error
 	if err != nil {
 		zlog.ErrorWithCtx(c, "Failed to query old VMs", err)
 		return nil, err
@@ -148,7 +149,7 @@ func (d *VMInstanceDao) GetActiveVMs(c *gin.Context) ([]VMInstance, error) {
 	zlog.InfoWithCtx(c, "Querying all active VMs")
 
 	var vms []VMInstance
-	err := helpers.GatcDbClient.Where("status != ?", 3).Find(&vms).Error
+	err := helpers.GatcDbClient.Where("status != ?", constants.VMStatusDeleted).Find(&vms).Error
 	if err != nil {
 		zlog.ErrorWithCtx(c, "Failed to query active VMs", err)
 		return nil, err
@@ -168,7 +169,7 @@ func (d *VMInstanceDao) BatchUpdateStatusDeleted(c *gin.Context, vmIDs []string)
 
 	err := helpers.GatcDbClient.Model(&VMInstance{}).
 		Where("vm_id IN ?", vmIDs).
-		Update("status", 3).Error
+		Update("status", constants.VMStatusDeleted).Error
 
 	if err != nil {
 		zlog.ErrorWithCtx(c, "Failed to batch update VM status", err)
@@ -184,7 +185,7 @@ func (d *VMInstanceDao) GetByPrefix(c *gin.Context, prefix string, limit int) ([
 	zlog.InfoWithCtx(c, "Querying VMs by prefix", "prefix", prefix, "limit", limit)
 
 	var vms []VMInstance
-	query := helpers.GatcDbClient.Where("vm_id LIKE ? AND status != ?", prefix+"%", 3)
+	query := helpers.GatcDbClient.Where("vm_id LIKE ? AND status != ?", prefix+"%", constants.VMStatusDeleted)
 
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -217,4 +218,3 @@ func (d *VMInstanceDao) GetByProxy(c *gin.Context, proxy string) (*VMInstance, e
 	zlog.InfoWithCtx(c, "VM instance found by proxy", "vmId", vm.VMID, "proxy", proxy)
 	return &vm, nil
 }
-

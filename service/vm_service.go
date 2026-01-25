@@ -473,16 +473,16 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 	}
 
 	vmInstance := &dao.VMInstance{
-		VMID:          vmName,
-		VMName:        vmName,
-		Zone:          zone,
-		MachineType:   machineType,
-		ExternalIP:    externalIP,
-		Proxy:         proxyAuth,
-		ProxyType:     proxyType,
-		SSHUser:       "gatc",
-		SSHKeyContent: gcpConfig.GetSSHKeyContent(),
-		Status:        constants.VMStatusRunning,
+		VMID:        vmName,
+		VMName:      vmName,
+		Zone:        zone,
+		MachineType: machineType,
+		ExternalIP:  externalIP,
+		Proxy:       proxyAuth,
+		ProxyType:   proxyType,
+		SSHUser:     "gatc",
+		// SSHKeyContent: gcpConfig.GetSSHKeyContent(),
+		Status: constants.VMStatusRunning,
 	}
 
 	if err := dao.GVmInstanceDao.Create(c, vmInstance); err != nil {
@@ -973,13 +973,14 @@ type ReplaceProxyResourceParam struct {
 
 // ReplaceProxyResourceResult 替换代理资源结果
 type ReplaceProxyResourceResult struct {
-	NewVMsCreated      int      `json:"new_vms_created"`
-	NewProxiesAdded    int      `json:"new_proxies_added"`
-	OldProxiesDisabled int      `json:"old_proxies_disabled"`
-	TokensUpdated      int64    `json:"tokens_updated"`
-	OldVMsDeleted      int      `json:"old_vms_deleted"`
-	DeletedVMIDs       []string `json:"deleted_vm_ids"`
-	Message            string   `json:"message"`
+	NewVMsCreated      int                  `json:"new_vms_created"`
+	CreateVms          *BatchCreateVMResult `json:"create_vms"`
+	NewProxiesAdded    int                  `json:"new_proxies_added"`
+	OldProxiesDisabled int                  `json:"old_proxies_disabled"`
+	TokensUpdated      int64                `json:"tokens_updated"`
+	OldVMsDeleted      int                  `json:"old_vms_deleted"`
+	DeletedVMIDs       []string             `json:"deleted_vm_ids"`
+	Message            string               `json:"message"`
 }
 
 // ReplaceProxyResource 替换代理资源
@@ -1001,6 +1002,7 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 		return nil, fmt.Errorf("所有VM创建失败")
 	}
 	result.NewVMsCreated = batchCreateResult.Success
+	result.CreateVms = batchCreateResult
 	zlog.InfoWithCtx(c, "ReplaceProxyResource VMs created", "success", batchCreateResult.Success, "failed", batchCreateResult.Failed)
 
 	// 步骤2: 查询proxy_pool表，按created_at倒序limit num个（状态为active的）

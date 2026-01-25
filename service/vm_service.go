@@ -980,6 +980,7 @@ type ReplaceProxyResourceResult struct {
 	TokensUpdated      int64                `json:"tokens_updated"`
 	AsyncDeletedVMIDs  []string             `json:"async_deleted_vm_ids"`
 	Message            string               `json:"message"`
+	Warn               string               `json:"warn"`
 }
 
 // ReplaceProxyResource 替换代理资源
@@ -1033,6 +1034,10 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 	for _, vmResult := range batchCreateResult.Results {
 		// proxy格式: "http://35.208.147.190:1081" (不含/px后缀)
 		proxyURL := strings.TrimRight(vmResult.Proxy, "/px")
+		if proxyURL == "" {
+			result.Warn += fmt.Sprintf("\tvm %s proxy illegal,skip", vmResult.VMID)
+			continue
+		}
 		newProxies = append(newProxies, dao.ProxyPool{
 			Proxy:     proxyURL,
 			ProxyType: constants.ProxyTypeHttpProxyAlias,

@@ -1012,6 +1012,21 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 	}
 	zlog.InfoWithCtx(c, "ReplaceProxyResource Found old proxies", "count", len(lastBatchProxy))
 
+	// 步骤6: 将lastBatchProxy的status置为0  (步骤6提前， proxy_pool 有多个代理通Ip的情况，gcloud vm有Ip回收)
+	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 6: Disabling old proxies")
+	var oldProxyIDs []int64
+	for _, proxy := range lastBatchProxy {
+		oldProxyIDs = append(oldProxyIDs, proxy.ID)
+	}
+	if len(oldProxyIDs) > 0 {
+		if err := dao.GProxyPoolDao.BatchUpdateStatus(c, oldProxyIDs, dao.ProxyStatusDeleted); err != nil {
+			zlog.ErrorWithCtx(c, "Failed to disable old proxies", err)
+		} else {
+			result.OldProxiesDisabled = len(oldProxyIDs)
+			zlog.InfoWithCtx(c, "ReplaceProxyResource Old proxies disabled", "count", len(oldProxyIDs))
+		}
+	}
+
 	// 步骤3: 将新VM的代理插入proxy_pool表
 	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 3: Inserting new proxies to proxy_pool")
 	var newProxies []dao.ProxyPool
@@ -1063,21 +1078,6 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 	}
 	result.TokensUpdated = totalTokensUpdated
 	zlog.InfoWithCtx(c, "ReplaceProxyResource Total tokens updated", "count", totalTokensUpdated)
-
-	// 步骤6: 将lastBatchProxy的status置为0
-	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 6: Disabling old proxies")
-	var oldProxyIDs []int64
-	for _, proxy := range lastBatchProxy {
-		oldProxyIDs = append(oldProxyIDs, proxy.ID)
-	}
-	if len(oldProxyIDs) > 0 {
-		if err := dao.GProxyPoolDao.BatchUpdateStatus(c, oldProxyIDs, dao.ProxyStatusInactive); err != nil {
-			zlog.ErrorWithCtx(c, "Failed to disable old proxies", err)
-		} else {
-			result.OldProxiesDisabled = len(oldProxyIDs)
-			zlog.InfoWithCtx(c, "ReplaceProxyResource Old proxies disabled", "count", len(oldProxyIDs))
-		}
-	}
 
 	// 步骤7: 获取旧代理对应的VM ID
 	zlog.InfoWithCtx(c, "ReplaceProxyResource Step 7: Finding old VMs to delete")

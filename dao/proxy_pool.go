@@ -31,8 +31,9 @@ import (
 
 const (
 	ProxyStatusInactive = 0
-  ProxyStatusActive   = 1
-  ProxyStatusOccupied  = 2
+	ProxyStatusActive   = 1
+	ProxyStatusOccupied = 2
+	ProxyStatusDeleted  = 9
 )
 
 type ProxyPool struct {

@@ -1042,6 +1042,7 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 			Proxy:     proxyURL,
 			ProxyType: constants.ProxyTypeHttpProxyAlias,
 			Status:    dao.ProxyStatusActive,
+			FromVM:    1, // 标记为来自VM
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		})
@@ -1136,13 +1137,12 @@ type ReplaceProxyResourceV2Result struct {
 
 // ReplaceProxyResourceV2 替换代理资源V2版本
 // 逻辑：先标记旧VM为预删除状态，然后创建新VM，由定时任务负责真正删除
-func (s *VMService) ReplaceProxyResourceV2(c *gin.Context, param *ReplaceProxyResourceParam) (*ReplaceProxyResourceV2Result, error) {
+func (s *VMService) ReplaceProxyResourceV2(c *gin.Context, param *ReplaceProxyResourceParam) (result ReplaceProxyResourceV2Result, err error) {
 	// 验证proxy_type必须是server或httpProxyServer
 	if param.ProxyType != constants.ProxyTypeHttpProxyAlias && param.ProxyType != constants.ProxyTypeHttpProxy {
-		return nil, fmt.Errorf("proxy_type必须是'server'或'httpProxyServer'，当前值: %s", param.ProxyType)
+		err = fmt.Errorf("proxy_type必须是'server'或'httpProxyServer'，当前值: %s", param.ProxyType)
+		return
 	}
-
-	result := &ReplaceProxyResourceV2Result{}
 
 	// 步骤1: 按Zone、MachineType、ProxyType查询最多num个Running状态的VM
 	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Step 1: Querying VMs to mark as pending delete",
@@ -1159,7 +1159,8 @@ func (s *VMService) ReplaceProxyResourceV2(c *gin.Context, param *ReplaceProxyRe
 
 	oldVMs, err := dao.GVmInstanceDao.GetByConditions(c, zone, machineType, param.ProxyType, constants.VMStatusRunning, param.Num)
 	if err != nil {
-		return nil, fmt.Errorf("查询旧VM失败: %v", err)
+		err = fmt.Errorf("查询旧VM失败: %v", err)
+		return
 	}
 	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Found VMs to replace", "count", len(oldVMs))
 
@@ -1171,7 +1172,8 @@ func (s *VMService) ReplaceProxyResourceV2(c *gin.Context, param *ReplaceProxyRe
 		}
 
 		if err := dao.GVmInstanceDao.BatchUpdateStatusByIDs(c, vmIDs, constants.VMStatusPendingDelete); err != nil {
-			return nil, fmt.Errorf("标记VM为预删除状态失败: %v", err)
+			err = fmt.Errorf("标记VM为预删除状态失败: %v", err)
+			return result, err
 		}
 		result.MarkedPendingDelete = len(vmIDs)
 		zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Marked VMs as pending delete", "count", len(vmIDs))
@@ -1181,20 +1183,19 @@ func (s *VMService) ReplaceProxyResourceV2(c *gin.Context, param *ReplaceProxyRe
 	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Step 2: Creating new VMs", "num", param.Num)
 	batchCreateResult, err := s.BatchCreateVM(c, &param.BatchCreateVMParam)
 	if err != nil {
-		return nil, fmt.Errorf("创建新VM失败: %v", err)
+		err = fmt.Errorf("创建新VM失败: %v", err)
+		return
 	}
 	if batchCreateResult.Success == 0 {
-		return nil, fmt.Errorf("所有VM创建失败")
+		err = fmt.Errorf("所有VM创建失败")
+		return
 	}
 	result.NewVMsCreated = batchCreateResult.Success
 	result.CreateVms = batchCreateResult
 	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 VMs created", "success", batchCreateResult.Success, "failed", batchCreateResult.Failed)
 
-	result.Message = fmt.Sprintf("代理资源替换V2完成: 标记预删除VM %d个, 新建VM %d个",
-		result.MarkedPendingDelete, result.NewVMsCreated)
-
 	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Completed", "result", result)
-	return result, nil
+	return
 }
 
 // CleanupPendingDeleteVMs 清理预删除状态的VM（定时任务）
@@ -1240,4 +1241,130 @@ func (s *VMService) CleanupPendingDeleteVMs() {
 		"total", deleteResult.Total,
 		"success", deleteResult.Success,
 		"failed", deleteResult.Failed)
+}
+
+type SyncProxyPoolFromVMsRes struct {
+	OldFromVmProxyCount int      `json:"old_from_vm_proxy_count"`
+	ActiveVmCount       int      `json:"active_vm_count"`
+	DelProxiesCount     int      `json:"del_proxies_count"`
+	DelProxies          []int64  `json:"del_proxies"`
+	AddProxyCount       int      `json:"add_proxy_count"`
+	AddProxies          []string `json:"add_proxies"`
+	ErrMsg              string   `json:"err_msg"`
+}
+
+// SyncProxyPoolFromVMs 从VM同步代理池
+// 逻辑：
+// 1. 查询 proxy_pool 表中 from_vm > 0 的记录作为 set1
+// 2. 查询 vm_instances 表中 status = Running 的 VM 作为 set2
+// 3. 遍历 set1，跳过非server类型，不在set2中的设置为deleted，在set2中的标记VM为已处理
+// 4. 遍历 set2，对未处理的插入新的 ProxyPool 记录
+func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromVMsRes,err error) {
+	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Starting sync proxy pool from VMs")
+
+	// 步骤1: 查询 proxy_pool 表中 from_vm > 0 的记录
+	set1, err := dao.GProxyPoolDao.GetFromVMProxies(c)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to get proxy pool records from VM", err)
+		err = fmt.Errorf("查询proxy_pool失败: %v", err)
+		res.ErrMsg = err.Error()
+		return
+	}
+	res.OldFromVmProxyCount = len(set1)
+	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Found proxy pool records from VM", "count", len(set1))
+
+	// 步骤2: 查询 vm_instances 表中 status = Running 的 VM
+	set2, err := dao.GVmInstanceDao.GetActiveVMs(c)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to get active VMs", err)
+		err = fmt.Errorf("查询active VMs失败: %v", err)
+		return
+	}
+	res.ActiveVmCount = len(set2)
+	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Found active VMs", "count", len(set2))
+
+	// 构建 set2 的 proxy 映射（去掉 /px 后缀）
+	// key: proxy (不含/px), value: VM对象的指针（用于标记处理状态）
+	type VMWithFlag struct {
+		VM        dao.VMInstance
+		Processed bool
+	}
+	set2Map := make(map[string]*VMWithFlag)
+	for _, vm := range set2 {
+		// vm_instances.proxy 格式: "http://IP:1081/px"
+		// proxy_pool.proxy 格式: "http://IP:1081"
+		proxyWithoutSuffix := strings.TrimSuffix(vm.Proxy, "/px")
+		if proxyWithoutSuffix != "" && vm.ProxyType == constants.ProxyTypeHttpProxyAlias {
+			set2Map[proxyWithoutSuffix] = &VMWithFlag{
+				VM:        vm,
+				Processed: false,
+			}
+		}
+	}
+	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Built VM proxy map", "count", len(set2Map))
+
+	// 步骤3: 遍历 set1
+	var toDeleteProxyIDs []int64
+	for _, proxyRecord := range set1 {
+		// 跳过非 server 类型
+		if proxyRecord.ProxyType != constants.ProxyTypeHttpProxyAlias {
+			continue
+		}
+
+		// 检查是否在 set2 中
+		if vmWithFlag, exists := set2Map[proxyRecord.Proxy]; exists {
+			vmWithFlag.Processed = true
+		} else {
+			toDeleteProxyIDs = append(toDeleteProxyIDs, proxyRecord.ID)
+		}
+	}
+	res.DelProxiesCount = len(toDeleteProxyIDs)
+	res.DelProxies = toDeleteProxyIDs
+
+	// 批量更新待删除的代理状态
+	if len(toDeleteProxyIDs) > 0 {
+		if err2 := dao.GProxyPoolDao.BatchUpdateStatus(c, toDeleteProxyIDs, dao.ProxyStatusDeleted); err2 != nil {
+			zlog.ErrorWithCtx(c, "Failed to update deleted proxies status", err2)
+			err = fmt.Errorf("Failed to update deleted proxies status, %w", err2)
+			res.ErrMsg = err.Error()
+			return
+		} else {
+			zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Updated deleted proxies status", "count", len(toDeleteProxyIDs))
+		}
+	}
+
+	// 步骤4: 遍历 set2，对未处理的插入新记录
+	var newProxies []dao.ProxyPool
+	for proxy, vmWithFlag := range set2Map {
+		if !vmWithFlag.Processed {
+			// 未处理的，需要插入新记录
+			newProxies = append(newProxies, dao.ProxyPool{
+				Proxy:     proxy,
+				ProxyType: constants.ProxyTypeHttpProxyAlias,
+				Status:    dao.ProxyStatusActive,
+				FromVM:    1, // 标记为来自VM
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+			res.AddProxies = append(res.AddProxies, proxy)
+		}
+	}
+
+	// 批量插入新代理
+	if len(newProxies) > 0 {
+		if err2 := dao.GProxyPoolDao.BatchCreate(c, newProxies); err2 != nil {
+			zlog.ErrorWithCtx(c, "Failed to insert new proxies", err2)
+			err = fmt.Errorf("插入新代理失败: %v", err2)
+			res.ErrMsg = err.Error()
+			return
+		}
+		res.AddProxyCount = len(newProxies)
+		zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Inserted new proxies", "count", len(newProxies))
+	}
+
+	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Sync completed",
+		"deleted", len(toDeleteProxyIDs),
+		"inserted", len(newProxies))
+
+	return 
 }

@@ -4,7 +4,6 @@ import (
 	"gatc/base/zlog"
 	"gatc/constants"
 	"gatc/helpers"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -159,27 +158,6 @@ func (d *VMInstanceDao) GetActiveVMs(c *gin.Context) ([]VMInstance, error) {
 	return vms, nil
 }
 
-// BatchUpdateStatusDeleted 批量设置VM状态为已删除
-func (d *VMInstanceDao) BatchUpdateStatusDeleted(c *gin.Context, vmIDs []string) error {
-	zlog.InfoWithCtx(c, "Batch updating VM status to deleted", "count", len(vmIDs), "vmIds", strings.Join(vmIDs, ","))
-
-	if len(vmIDs) == 0 {
-		return nil
-	}
-
-	err := helpers.GatcDbClient.Model(&VMInstance{}).
-		Where("vm_id IN ?", vmIDs).
-		Update("status", constants.VMStatusDeleted).Error
-
-	if err != nil {
-		zlog.ErrorWithCtx(c, "Failed to batch update VM status", err)
-	} else {
-		zlog.InfoWithCtx(c, "Successfully batch updated VM status", "count", len(vmIDs), "vmIds", strings.Join(vmIDs, ","))
-	}
-
-	return err
-}
-
 // GetByPrefix 根据前缀查询VM列表
 func (d *VMInstanceDao) GetByPrefix(c *gin.Context, prefix string, limit int) ([]VMInstance, error) {
 	zlog.InfoWithCtx(c, "Querying VMs by prefix", "prefix", prefix, "limit", limit)
@@ -217,4 +195,74 @@ func (d *VMInstanceDao) GetByProxy(c *gin.Context, proxy string) (*VMInstance, e
 
 	zlog.InfoWithCtx(c, "VM instance found by proxy", "vmId", vm.VMID, "proxy", proxy)
 	return &vm, nil
+}
+
+// GetByConditions 根据条件查询VM列表
+func (d *VMInstanceDao) GetByConditions(c *gin.Context, zone, machineType, proxyType string, status int, limit int) ([]VMInstance, error) {
+	zlog.InfoWithCtx(c, "Querying VMs by conditions", "zone", zone, "machineType", machineType, "proxyType", proxyType, "status", status, "limit", limit)
+
+	var vms []VMInstance
+	query := helpers.GatcDbClient.Where("status = ?", status)
+
+	if zone != "" {
+		query = query.Where("zone = ?", zone)
+	}
+	if machineType != "" {
+		query = query.Where("machine_type = ?", machineType)
+	}
+	if proxyType != "" {
+		query = query.Where("proxy_type = ?", proxyType)
+	}
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Find(&vms).Error
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to query VMs by conditions", err)
+		return nil, err
+	}
+
+	zlog.InfoWithCtx(c, "Found VMs by conditions", "count", len(vms))
+	return vms, nil
+}
+
+// BatchUpdateStatusByIDs 批量更新VM状态（通过VM ID列表）
+func (d *VMInstanceDao) BatchUpdateStatusByIDs(c *gin.Context, vmIDs []string, status int) error {
+	zlog.InfoWithCtx(c, "Batch updating VM status by IDs", "count", len(vmIDs), "status", status)
+
+	if len(vmIDs) == 0 {
+		return nil
+	}
+
+	err := helpers.GatcDbClient.Model(&VMInstance{}).
+		Where("vm_id IN ?", vmIDs).
+		Updates(map[string]interface{}{
+			"status":     status,
+			"updated_at": time.Now(),
+		}).Error
+
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to batch update VM status by IDs", err)
+	} else {
+		zlog.InfoWithCtx(c, "Successfully batch updated VM status by IDs", "count", len(vmIDs), "status", status)
+	}
+
+	return err
+}
+
+// GetPendingDeleteVMsBeforeTime 获取指定时间之前更新的预删除状态VM
+func (d *VMInstanceDao) GetPendingDeleteVMsBeforeTime(c *gin.Context, cutoffTime time.Time) ([]VMInstance, error) {
+	zlog.InfoWithCtx(c, "Querying pending delete VMs before time", "cutoffTime", cutoffTime)
+
+	var vms []VMInstance
+	err := helpers.GatcDbClient.Where("status = ? AND updated_at < ?", constants.VMStatusPendingDelete, cutoffTime).Find(&vms).Error
+	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to query pending delete VMs", err)
+		return nil, err
+	}
+
+	zlog.InfoWithCtx(c, "Found pending delete VMs", "count", len(vms))
+	return vms, nil
 }

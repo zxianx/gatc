@@ -15,9 +15,13 @@ const (
 	SSHPubKeyPath = "./conf/gcp/gatc_rsa.pub"
 
 	// VM状态
-	VMStatusRunning = 1
-	VMStatusStopped = 2
-	VMStatusDeleted = 3
+	VMStatusRunning       = 1
+	VMStatusStopped       = 2
+	VMStatusDeleted       = 3
+	VMStatusPendingDelete = 4 // 预删除状态
+
+	// VM预删除状态保留时间（小时）
+	VMPendingDeleteRetentionHours = 1
 
 	// 代理类型
 	ProxyTypeSocks5         = "socks5"

@@ -184,3 +184,20 @@ func (h *VMHandler) ReplaceProxyResource(c *gin.Context) {
 
 	response.Success(c, result)
 }
+
+// ReplaceProxyResourceV2 替换代理资源接口V2版本
+func (h *VMHandler) ReplaceProxyResourceV2(c *gin.Context) {
+	var req ReplaceProxyResourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
+		return
+	}
+
+	result, err := h.vmService.ReplaceProxyResourceV2(c, &req.ReplaceProxyResourceParam)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}

@@ -914,7 +914,7 @@ func (s *VMService) SyncVMsWithGCP() {
 	}
 
 	if len(toDeleteVMIDs) > 0 {
-		if err := dao.GVmInstanceDao.BatchUpdateStatusDeleted(c, toDeleteVMIDs); err != nil {
+		if err := dao.GVmInstanceDao.BatchUpdateStatusDeleted(c, toDeleteVMIDs, constants.VMStatusDeleted); err != nil {
 			zlog.ErrorWithCtx(c, "SyncVMsWithGCP Failed to batch delete VMs during sync", err)
 		} else {
 			zlog.InfoWithCtx(c, "SyncVMsWithGCP Marked VMs as deleted during sync", "count", len(toDeleteVMIDs), "vmIds", toDeleteVMIDs)
@@ -1124,4 +1124,120 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 
 	zlog.InfoWithCtx(c, "ReplaceProxyResource Completed", "result", result)
 	return result, nil
+}
+
+// ReplaceProxyResourceV2Result V2版本替换代理资源结果
+type ReplaceProxyResourceV2Result struct {
+	MarkedPendingDelete int                  `json:"marked_pending_delete"` // 标记为预删除的VM数量
+	NewVMsCreated       int                  `json:"new_vms_created"`
+	CreateVms           *BatchCreateVMResult `json:"create_vms"`
+	Message             string               `json:"message"`
+}
+
+// ReplaceProxyResourceV2 替换代理资源V2版本
+// 逻辑：先标记旧VM为预删除状态，然后创建新VM，由定时任务负责真正删除
+func (s *VMService) ReplaceProxyResourceV2(c *gin.Context, param *ReplaceProxyResourceParam) (*ReplaceProxyResourceV2Result, error) {
+	// 验证proxy_type必须是server或httpProxyServer
+	if param.ProxyType != constants.ProxyTypeHttpProxyAlias && param.ProxyType != constants.ProxyTypeHttpProxy {
+		return nil, fmt.Errorf("proxy_type必须是'server'或'httpProxyServer'，当前值: %s", param.ProxyType)
+	}
+
+	result := &ReplaceProxyResourceV2Result{}
+
+	// 步骤1: 按Zone、MachineType、ProxyType查询最多num个Running状态的VM
+	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Step 1: Querying VMs to mark as pending delete",
+		"zone", param.Zone, "machineType", param.MachineType, "proxyType", param.ProxyType, "num", param.Num)
+
+	zone := param.Zone
+	if zone == "" {
+		zone = constants.DefaultZone
+	}
+	machineType := param.MachineType
+	if machineType == "" {
+		machineType = constants.DefaultMachineType
+	}
+
+	oldVMs, err := dao.GVmInstanceDao.GetByConditions(c, zone, machineType, param.ProxyType, constants.VMStatusRunning, param.Num)
+	if err != nil {
+		return nil, fmt.Errorf("查询旧VM失败: %v", err)
+	}
+	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Found VMs to replace", "count", len(oldVMs))
+
+	// 步骤2: 将这些VM的状态设置为预删除状态
+	if len(oldVMs) > 0 {
+		var vmIDs []string
+		for _, vm := range oldVMs {
+			vmIDs = append(vmIDs, vm.VMID)
+		}
+
+		if err := dao.GVmInstanceDao.BatchUpdateStatusByIDs(c, vmIDs, constants.VMStatusPendingDelete); err != nil {
+			return nil, fmt.Errorf("标记VM为预删除状态失败: %v", err)
+		}
+		result.MarkedPendingDelete = len(vmIDs)
+		zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Marked VMs as pending delete", "count", len(vmIDs))
+	}
+
+	// 步骤3: 创建num个新代理VM
+	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Step 2: Creating new VMs", "num", param.Num)
+	batchCreateResult, err := s.BatchCreateVM(c, &param.BatchCreateVMParam)
+	if err != nil {
+		return nil, fmt.Errorf("创建新VM失败: %v", err)
+	}
+	if batchCreateResult.Success == 0 {
+		return nil, fmt.Errorf("所有VM创建失败")
+	}
+	result.NewVMsCreated = batchCreateResult.Success
+	result.CreateVms = batchCreateResult
+	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 VMs created", "success", batchCreateResult.Success, "failed", batchCreateResult.Failed)
+
+	result.Message = fmt.Sprintf("代理资源替换V2完成: 标记预删除VM %d个, 新建VM %d个",
+		result.MarkedPendingDelete, result.NewVMsCreated)
+
+	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Completed", "result", result)
+	return result, nil
+}
+
+// CleanupPendingDeleteVMs 清理预删除状态的VM（定时任务）
+func (s *VMService) CleanupPendingDeleteVMs() {
+	c := &gin.Context{}
+
+	zlog.InfoWithCtx(c, "CleanupPendingDeleteVMs Starting cleanup of pending delete VMs")
+
+	// 获取更新时间在指定小时之前的预删除状态VM
+	cutoffTime := time.Now().Add(-time.Duration(constants.VMPendingDeleteRetentionHours) * time.Hour)
+
+	vms, err := dao.GVmInstanceDao.GetPendingDeleteVMsBeforeTime(c, cutoffTime)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "CleanupPendingDeleteVMs Failed to get pending delete VMs", err)
+		return
+	}
+
+	if len(vms) == 0 {
+		zlog.InfoWithCtx(c, "CleanupPendingDeleteVMs No pending delete VMs to cleanup")
+		return
+	}
+
+	zlog.InfoWithCtx(c, "CleanupPendingDeleteVMs Found pending delete VMs", "count", len(vms))
+
+	// 收集VM ID列表
+	var vmIDs []string
+	for _, vm := range vms {
+		vmIDs = append(vmIDs, vm.VMID)
+	}
+
+	// 调用批量删除服务
+	batchDeleteParam := &BatchDeleteVMParam{
+		VMList: vmIDs,
+	}
+
+	deleteResult, err := s.BatchDeleteVM(c, batchDeleteParam)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "CleanupPendingDeleteVMs Failed to batch delete VMs", err)
+		return
+	}
+
+	zlog.InfoWithCtx(c, "CleanupPendingDeleteVMs Cleanup completed",
+		"total", deleteResult.Total,
+		"success", deleteResult.Success,
+		"failed", deleteResult.Failed)
 }

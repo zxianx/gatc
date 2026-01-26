@@ -57,6 +57,7 @@ func main() {
 	cron.Init()
 	cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs)
 	cron.AddFunc("Sync VMs with GCP", "@every 1h", service.GVmService.SyncVMsWithGCP)
+	cron.AddFunc("Cleanup Pending Delete VMs", "@every 1h", service.GVmService.CleanupPendingDeleteVMs)
 	cron.Start()
 
 	r := gin.Default()
@@ -99,6 +100,7 @@ func setupRoutes(r *gin.Engine) {
 			vm.GET("/get", vmHandler.GetVM)
 			vm.POST("/refresh-ip", vmHandler.RefreshVMIP)
 			vm.POST("/replace-proxy-resource", vmHandler.ReplaceProxyResource)
+			vm.POST("/replace-proxy-resource-v2", vmHandler.ReplaceProxyResourceV2)
 		}
 
 		account := api.Group("/account")

@@ -154,6 +154,7 @@ func (h *VMHandler) RefreshVMIP(c *gin.Context) {
 // ReplaceProxyResourceRequest 替换代理资源请求结构
 type ReplaceProxyResourceRequest struct {
 	service.ReplaceProxyResourceParam
+	SyncProxy bool `json:"sync_proxy"`
 }
 type ReplaceProxyResourceRes struct {
 	ReplaceRes service.ReplaceProxyResourceV2Result `json:"replace_res"`
@@ -215,14 +216,17 @@ func (h *VMHandler) ReplaceProxyResourceV2(c *gin.Context) {
 		return
 	}
 
-	zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Step 3: Syncing proxy pool from VMs")
-	syncRes, err2 := service.GVmService.SyncProxyPoolFromVMs(c)
-	if err2 != nil {
-		result.Err += "\t" + err2.Error()
-		zlog.ErrorWithCtx(c, "Failed to sync proxy pool from VMs", err2)
-	} else {
-		zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Proxy pool synced successfully")
+	if req.SyncProxy {
+		zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Step 3: Syncing proxy pool from VMs")
+		syncRes, err2 := service.GVmService.SyncProxyPoolFromVMs(c)
+		if err2 != nil {
+			result.Err += "\t" + err2.Error()
+			zlog.ErrorWithCtx(c, "Failed to sync proxy pool from VMs", err2)
+		} else {
+			zlog.InfoWithCtx(c, "ReplaceProxyResourceV2 Proxy pool synced successfully")
+		}
+		result.SyncRes = syncRes
 	}
-	result.SyncRes = syncRes
+
 	response.Success(c, result)
 }

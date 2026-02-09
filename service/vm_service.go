@@ -1259,13 +1259,13 @@ type SyncProxyPoolFromVMsRes struct {
 // 2. 查询 vm_instances 表中 status = Running 的 VM 作为 set2
 // 3. 遍历 set1，跳过非server类型，不在set2中的设置为deleted，在set2中的标记VM为已处理
 // 4. 遍历 set2，对未处理的插入新的 ProxyPool 记录
-func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromVMsRes,err error) {
+func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromVMsRes, err error) {
 	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Starting sync proxy pool from VMs")
 
 	// 步骤1: 查询 proxy_pool 表中 from_vm > 0 的记录
 	set1, err := dao.GProxyPoolDao.GetFromVMProxies(c)
 	if err != nil {
-		zlog.ErrorWithCtx(c, "Failed to get proxy pool records from VM", err)
+		zlog.ErrorWithCtx(c, "SyncProxyPoolFromVMs,Failed to get proxy pool records from VM", err)
 		err = fmt.Errorf("查询proxy_pool失败: %v", err)
 		res.ErrMsg = err.Error()
 		return
@@ -1276,7 +1276,7 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 	// 步骤2: 查询 vm_instances 表中 status = Running 的 VM
 	set2, err := dao.GVmInstanceDao.GetActiveVMs(c)
 	if err != nil {
-		zlog.ErrorWithCtx(c, "Failed to get active VMs", err)
+		zlog.ErrorWithCtx(c, "SyncProxyPoolFromVMs, Failed to get active VMs", err)
 		err = fmt.Errorf("查询active VMs失败: %v", err)
 		return
 	}
@@ -1301,7 +1301,7 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 			}
 		}
 	}
-	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Built VM proxy map", "count", len(set2Map))
+	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs, Built VM proxy map", "count", len(set2Map))
 
 	// 步骤3: 遍历 set1
 	var toDeleteProxyIDs []int64
@@ -1323,13 +1323,13 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 
 	// 批量更新待删除的代理状态
 	if len(toDeleteProxyIDs) > 0 {
-		if err2 := dao.GProxyPoolDao.BatchUpdateStatus(c, toDeleteProxyIDs, dao.ProxyStatusDeleted); err2 != nil {
-			zlog.ErrorWithCtx(c, "Failed to update deleted proxies status", err2)
-			err = fmt.Errorf("Failed to update deleted proxies status, %w", err2)
+		if err2 := dao.GProxyPoolDao.BatchDelete(c, toDeleteProxyIDs); err2 != nil {
+			zlog.ErrorWithCtx(c, "SyncProxyPoolFromVMs, Failed to  deleted proxies status", err2)
+			err = fmt.Errorf("SyncProxyPoolFromVMs, Failed to  deleted proxies status, %w", err2)
 			res.ErrMsg = err.Error()
 			return
 		} else {
-			zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs Updated deleted proxies status", "count", len(toDeleteProxyIDs))
+			zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs, deleted proxies status", "count", len(toDeleteProxyIDs))
 		}
 	}
 
@@ -1366,5 +1366,5 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 		"deleted", len(toDeleteProxyIDs),
 		"inserted", len(newProxies))
 
-	return 
+	return
 }

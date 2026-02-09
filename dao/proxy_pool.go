@@ -90,6 +90,15 @@ func (d *ProxyPoolDao) BatchUpdateStatus(c *gin.Context, proxyIDs []int64, statu
 		}).Error
 }
 
+func (d *ProxyPoolDao) BatchDelete(c *gin.Context, proxyIDs []int64) error {
+	if len(proxyIDs) == 0 {
+		return nil
+	}
+	return getDB(c).Model(&ProxyPool{}).
+		Where("id IN ?", proxyIDs).
+		Delete(&ProxyPool{}).Error // 这里改为 &ProxyPool{}
+}
+
 // GetByProxy 根据proxy地址查询
 func (d *ProxyPoolDao) GetByProxy(c *gin.Context, proxy string) (*ProxyPool, error) {
 	var p ProxyPool

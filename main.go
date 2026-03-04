@@ -57,7 +57,7 @@ func main() {
 	cron.Init()
 	cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs)
 	cron.AddFunc("Sync VMs with GCP", "@every 1h", service.GVmService.SyncVMsWithGCP)
-	cron.AddFunc("Cleanup Pending Delete VMs", "@every 1h", service.GVmService.CleanupPendingDeleteVMs)
+	cron.AddFunc("Cleanup Pending Delete VMs", "@every 10m", service.GVmService.CleanupPendingDeleteVMs)
 	cron.Start()
 
 	r := gin.Default()

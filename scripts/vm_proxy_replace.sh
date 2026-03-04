@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # chmod +x vm_proxy_replace.sh
-# 22 17 * * * /bin/bash /home/user1/cron/vm_proxy_replace.sh
+# 0 0 * * * /bin/bash /home/user1/cron/vm_proxy_replace.sh
 
 # 配置变量
-URL="http://38.129.137.18:8401/api/v1/vm/replace-proxy-resource"
+URL="http://38.129.137.18:8401/api/v1/vm/replace-proxy-resource-v2"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 TAG_DATE=$(date '+%y%m%d%H%M')
 LOG_FILE="/home/user1/cron/vm_proxy_replace.log"
@@ -25,6 +25,7 @@ response=$(curl -s -w "\n%{http_code}\n%{exitcode}" \
   --data-raw '{
     "num": 50,
     "tag": "replace'$TAG_DATE'",
+    "sync_proxy": true,
     "proxy_type": "server"
   }')
 

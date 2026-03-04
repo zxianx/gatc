@@ -1321,7 +1321,7 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 	res.DelProxiesCount = len(toDeleteProxyIDs)
 	res.DelProxies = toDeleteProxyIDs
 
-	// 批量更新待删除的代理状态
+	// 批量同步proxy pool表， 硬删除已经不在vm里的proxy（来源为vm）， 将不在 pool的的vm proxy 插入pool
 	if len(toDeleteProxyIDs) > 0 {
 		if err2 := dao.GProxyPoolDao.BatchDelete(c, toDeleteProxyIDs); err2 != nil {
 			zlog.ErrorWithCtx(c, "SyncProxyPoolFromVMs, Failed to  deleted proxies status", err2)

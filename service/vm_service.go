@@ -940,7 +940,7 @@ func (s *VMService) SyncVMsWithGCP() {
 					SSHUser:     "gatc", // 默认SSH用户
 				}
 				//
-				if strings.Contains(gcpVM.Name, constants.ProxyTypeHttpProxy) {
+				if strings.Contains(gcpVM.Name, strings.ToLower(constants.ProxyTypeHttpProxy)) {
 					newVM.ProxyType = constants.ProxyTypeHttpProxy
 					newVM.Proxy = "http://" + gcpVM.ExternalIP + ":1081/px"
 				} // todo 其他代理类型

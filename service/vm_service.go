@@ -576,10 +576,7 @@ func (s *VMService) ListVMs(c *gin.Context, param *ListVMParam) (*ListVMResult, 
 		page = param.Page
 	}
 
-	size := 10
-	if param.Size > 0 && param.Size <= 100 {
-		size = param.Size
-	}
+	size := param.Size
 
 	offset := (page - 1) * size
 

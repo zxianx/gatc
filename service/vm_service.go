@@ -939,6 +939,12 @@ func (s *VMService) SyncVMsWithGCP() {
 					Status:      constants.VMStatusRunning,
 					SSHUser:     "gatc", // 默认SSH用户
 				}
+				//
+				if strings.Contains(gcpVM.Name, constants.ProxyTypeHttpProxy) {
+					newVM.ProxyType = constants.ProxyTypeHttpProxy
+					newVM.Proxy = "http://" + gcpVM.ExternalIP + ":1081/px"
+				} // todo 其他代理类型
+
 				toInsertVMs = append(toInsertVMs, newVM)
 			}
 		}

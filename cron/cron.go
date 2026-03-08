@@ -3,6 +3,7 @@ package cron
 import (
 	"fmt"
 	"gatc/base/zlog"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -28,13 +29,19 @@ func Stop() {
 	}
 }
 
-func AddFunc(name string, spec string, cmd func())  {
+func AddFunc(name string, spec string, cmd func(), extra_once_run_delay time.Duration) {
 	if globalCron == nil {
 		Init()
 	}
 	_, err := globalCron.AddFunc(spec, cmd)
-	if err!=nil {
-		panic(fmt.Sprintf("globalCron.AddFunc fail , name: %s, cron %s, err %v", name,spec,err))
+	if err != nil {
+		panic(fmt.Sprintf("globalCron.AddFunc fail , name: %s, cron %s, err %v", name, spec, err))
+	}
+	if extra_once_run_delay >= 0 {
+		go func() {
+			time.Sleep(extra_once_run_delay)
+			cmd()
+		}()
 	}
 }
 

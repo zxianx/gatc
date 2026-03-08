@@ -650,7 +650,8 @@ func (s *VMService) RefreshVMIP(c *gin.Context, param *RefreshVMIPParam) (*Refre
 
 // GCPVMInstance GCP中的VM实例信息
 type GCPVMInstance struct {
-	ID          string `json:"id"`
+	// ID          string `json:"id"` // 历史原因，直接按name管理
+	GcpOriId    string `json:"gcpOriId"`
 	Name        string `json:"name"`
 	Zone        string `json:"zone"`
 	MachineType string `json:"machineType"`
@@ -668,7 +669,7 @@ func (s *VMService) getGCPVMInstances(c *gin.Context) ([]GCPVMInstance, error) {
 	gcpConfig := config.GetGCPConfig()
 	projectID := gcpConfig.GetProjectID()
 
-	cmdStr := fmt.Sprintf("gcloud compute instances list --project=%s --format=json", projectID)
+	cmdStr := fmt.Sprintf("gcloud compute instances list --project=%s --format=json", projectID) // id是个数字，name才是db里的id
 
 	zlog.InfoWithCtx(c, "Getting GCP VM instances", "command", cmdStr)
 
@@ -689,7 +690,7 @@ func (s *VMService) getGCPVMInstances(c *gin.Context) ([]GCPVMInstance, error) {
 		instance := GCPVMInstance{}
 
 		if id, ok := raw["id"].(string); ok {
-			instance.ID = id
+			instance.GcpOriId = id
 		}
 
 		if name, ok := raw["name"].(string); ok {
@@ -891,8 +892,8 @@ func (s *VMService) SyncVMsWithGCP() {
 	// 创建GCP实例名称的集合 (只包含GATC创建的VM)
 	gcpVMIds := make(map[string]GCPVMInstance)
 	for _, gcpVM := range gcpInstances {
-		if s.isGATCVM(gcpVM.ID) {
-			gcpVMIds[gcpVM.ID] = gcpVM
+		if s.isGATCVM(gcpVM.Name) {
+			gcpVMIds[gcpVM.Name] = gcpVM
 		}
 	}
 
@@ -929,7 +930,7 @@ func (s *VMService) SyncVMsWithGCP() {
 			// 只插入运行状态的GATC VM
 			if gcpVM.Status == "RUNNING" {
 				newVM := &dao.VMInstance{
-					VMID:        gcpVM.ID,
+					VMID:        gcpVM.Name,
 					VMName:      gcpVM.Name,
 					Zone:        gcpVM.Zone,
 					MachineType: gcpVM.MachineType,

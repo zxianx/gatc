@@ -69,7 +69,7 @@ type AuthSession struct {
 }
 
 func NewAuthLoginSession(ctx *WorkCtx) (session *AuthSession, err error) {
-	dealineCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	dealineCtx, cancel := context.WithTimeout(context.Background(), 28*time.Minute)
 
 	cmd := exec.CommandContext(dealineCtx,
 		"ssh",

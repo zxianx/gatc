@@ -91,6 +91,7 @@ func (h *AccountHandler) SubmitAuthKey(c *gin.Context) {
 
 	result, err := h.accountService.SubmitAuthKey(c, &req.SubmitAuthKeyParam)
 	if err != nil {
+		zlog.ErrorWithCtx(c, "Failed to submit auth key", err)
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

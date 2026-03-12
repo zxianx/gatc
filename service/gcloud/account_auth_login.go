@@ -18,6 +18,9 @@ const (
 
 func (ctx *WorkCtx) CheckTargetAccount() (AccountAuthStatus, error) {
 	// 获取VM上所有已认证的账户
+	// constants.SSHKeyPath  ./conf/gcp/gatc_rsa
+	//  ctx.VMInstance.SSHUser  gatc
+	// ctx.VMInstance.ExternalIP 35.206.70.252
 	listCmd := exec.Command(
 		"ssh",
 		"-i", constants.SSHKeyPath,
@@ -51,7 +54,7 @@ func (ctx *WorkCtx) CheckTargetAccount() (AccountAuthStatus, error) {
 			}
 
 			// 检查是否是目标邮箱
-			if email == ctx.Email {
+			if strings.ToLower(email) == strings.ToLower(ctx.Email) {
 				if strings.ToUpper(status) == "ACTIVE" || status == "*" {
 					return AccountAuthSStatusActive, nil
 				} else {

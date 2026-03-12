@@ -752,11 +752,13 @@ func insertOfficialToken(ginCtx *gin.Context, email string, project dao.GCPAccou
 	}
 
 	//todo 配置
-	//if strings.Contains(project.Sock5Proxy, "/px") {
-	//	// https://generativelanguage.googleapis.com
-	//	officialToken.BaseUrl = strings.TrimRight(project.Sock5Proxy, "/") + "/" + "https%3A%2F%2Fgenerativelanguage.googleapis.com"
-	//	officialToken.Proxy = ""
-	//}
+	if strings.Contains(project.Sock5Proxy, "/px") {
+		// https://generativelanguage.googleapis.com
+		// 1号1p， 设置个不存在的ip， 走后续流程替换成合适的
+		// officialToken.BaseUrl = strings.TrimRight(project.Sock5Proxy, "/") + "/" + "https%3A%2F%2Fgenerativelanguage.googleapis.com"
+		officialToken.BaseUrl = "http://127.0.0.1:1081" + "/px/" + "https%3A%2F%2Fgenerativelanguage.googleapis.com"
+		officialToken.Proxy = ""
+	}
 
 	if err := officialToken.Create(ginCtx); err != nil {
 		return 0, err

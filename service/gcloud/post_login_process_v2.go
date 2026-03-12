@@ -737,17 +737,18 @@ func insertOfficialToken(ginCtx *gin.Context, email string, project dao.GCPAccou
 		ChannelId: 16,                                          // 固定16
 		Name:      "gatc-" + strconv.FormatInt(project.ID, 10), // 固定
 		Token:     project.OfficialToken,                       // token
-		Proxy:     project.Sock5Proxy,                          // vm socket5地址
-		Priority:  50,                                          // priority
-		Weight:    100,                                         // weight
-		RpmLimit:  0,                                           // rpm_limit 0
-		TpmLimit:  0,                                           // tpm_limit 0
-		Status:    1,                                           // status
-		TokenType: "static",                                    // token_type
-		Email:     email,                                       // email
-		ProjectId: project.ProjectID,                           // project_id
-		CreatedAt: now,                                         // created_at
-		UpdatedAt: now,                                         // updated_at
+		//Proxy:     project.Sock5Proxy,                          // vm socket5地址
+		Proxy:     "",                // 置空，后续不是1号1ip了
+		Priority:  50,                // priority
+		Weight:    100,               // weight
+		RpmLimit:  0,                 // rpm_limit 0
+		TpmLimit:  0,                 // tpm_limit 0
+		Status:    1,                 // status
+		TokenType: "static",          // token_type
+		Email:     email,             // email
+		ProjectId: project.ProjectID, // project_id
+		CreatedAt: now,               // created_at
+		UpdatedAt: now,               // updated_at
 	}
 
 	//todo 配置

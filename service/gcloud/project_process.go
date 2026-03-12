@@ -38,7 +38,7 @@ func (p *ProjectProcessParam) Adapt() error {
 		p.UnbindOldBillingProj = tool.NewPtr(true)
 	}
 	if p.BindCreateProj == nil {
-		p.UnbindOldBillingProj = tool.NewPtr(true)
+		p.BindCreateProj = tool.NewPtr(true)
 	}
 	return nil
 }

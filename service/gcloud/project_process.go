@@ -7,6 +7,7 @@ import (
 	"gatc/constants"
 	"gatc/dao"
 	"gatc/helpers"
+	"gatc/tool"
 	"github.com/gin-gonic/gin"
 	"os/exec"
 	"strings"
@@ -24,6 +25,21 @@ type ProjectProcessCtx struct {
 type ProjectProcessParam struct {
 	Email                string `json:"email" form:"email" binding:"required"`
 	UnbindOldBillingProj *bool  `json:"unbind_old_billing_proj,omitempty"  form:"unbind_old_billing_proj,omitempty"`
+	MaxCreateProjNum     int    `json:"max_create_proj_num" form:"max_create_proj_num"`
+	BindCreateProj       *bool  `json:"bind_create_proj,omitempty" form:"bind_create_proj,omitempty"`
+}
+
+func (p *ProjectProcessParam) Adapt() error {
+	if p.MaxCreateProjNum == 0 {
+		p.MaxCreateProjNum = 3
+	}
+	if p.UnbindOldBillingProj == nil {
+		p.UnbindOldBillingProj = tool.NewPtr(true)
+	}
+	if p.BindCreateProj == nil {
+		p.UnbindOldBillingProj = tool.NewPtr(true)
+	}
+	return nil
 }
 
 // ProjectProcessResult 项目处理结果

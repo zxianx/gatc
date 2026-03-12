@@ -33,12 +33,12 @@ type GCPProject struct {
 
 // PostLoginProcessCtx 跨步骤共享的处理上下文
 type PostLoginProcessCtx struct {
+	Param           ProjectProcessParam
 	Ctx             *WorkCtx                   `json:"-"`
 	CliProjectList  []GCPProjectExt            `json:"cli_project_list"` // CLI获取的项目列表
 	DbProjectsMp    map[string]*dao.GCPAccount `json:"db_projects_mp"`   // 数据库项目映射 projectId -> daoInstance
 	BillingAccounts []string                   `json:"billing_accounts"` // 可用的billing账户列表
 	Result          ProjectProcessResult       `json:"result"`           // V3新增：直接在上下文中设置结果
-	UnBindCurProj   bool                       `json:"un_bind_cur_proj"` // V3新增：是否解绑当前绑定的项目
 }
 
 // ProcessPostLoginV3 执行V3的开号流程
@@ -51,7 +51,7 @@ func ProcessPostLoginV3(ctx *PostLoginProcessCtx) error {
 		Success: false,
 	}
 
-	// Step1: 补全12个项目，同步DB（不含状态同步）
+	// Step1: 补全个项目，同步DB（不含状态同步）
 	if err := PostLoginProcessStep1ProjectSetup(ctx); err != nil {
 		ctx.Result.Message = fmt.Sprintf("步骤1失败: %v", err)
 		return err
@@ -64,9 +64,11 @@ func ProcessPostLoginV3(ctx *PostLoginProcessCtx) error {
 	}
 
 	//Step3: 绑定billing account
-	if err := PostLoginProcessV3Step3BillingBind(ctx); err != nil {
-		ctx.Result.Message = fmt.Sprintf("步骤3失败: %v", err)
-		return err
+	if ctx.Param.BindCreateProj != nil && *ctx.Param.BindCreateProj {
+		if err := PostLoginProcessV3Step3BillingBind(ctx); err != nil {
+			ctx.Result.Message = fmt.Sprintf("步骤3失败: %v", err)
+			return err
+		}
 	}
 
 	// 指定项目，测试
@@ -160,8 +162,8 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "获取到CLI项目", "数量", len(ctx.CliProjectList))
 
-	// 2. 补充到12个项目
-	targetCount := 12
+	// 2. 补充项目
+	targetCount := ctx.Param.MaxCreateProjNum + len(ctx.CliProjectList)
 	if len(ctx.CliProjectList) < targetCount {
 		createdCount := targetCount - len(ctx.CliProjectList)
 		createdProjects, err := createProjects(ctx.Ctx, createdCount)
@@ -786,7 +788,8 @@ func updateOfficialTokenIdDirect(ginCtx *gin.Context, account *dao.GCPAccount, t
 // ====================== V3 新增函数 ======================
 
 func PostLoginProcessV3Step2BillingCheck(ctx *PostLoginProcessCtx) error {
-	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行V3 Step2: billing检查和解绑", "邮箱", ctx.Ctx.Email, "解绑模式", ctx.UnBindCurProj)
+	ubind := ctx.Param.UnbindOldBillingProj != nil && *ctx.Param.UnbindOldBillingProj
+	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "执行V3 Step2: billing检查和解绑", "邮箱", ctx.Ctx.Email, "解绑模式", ubind)
 
 	// 3.1 cli获取所有绑账单的项目
 	billingProjects, billingAccounts, err := getBillingProjectsInfo(ctx)
@@ -798,7 +801,7 @@ func PostLoginProcessV3Step2BillingCheck(ctx *PostLoginProcessCtx) error {
 	// 保存可用的billing账户
 	ctx.BillingAccounts = billingAccounts
 
-	if ctx.UnBindCurProj {
+	if ubind {
 		for projectID, _ := range billingProjects {
 			// do 解码
 			if err = unbindProjectBilling(ctx.Ctx, projectID); err != nil {

@@ -148,7 +148,7 @@ func (h *AccountHandler) ProcessProjectsV3(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
 		return
 	}
-
+	_ = param.Adapt()
 	// 检查邮箱请求频率限制
 	if param.Email != "" && !param.SkipRateLimit {
 		canProcess, remaining := h.emailLimiter.CanProcess(param.Email)

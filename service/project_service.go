@@ -100,11 +100,8 @@ func (s *ProjectService) ProcessProjectsV3(c *gin.Context, param *gcloud.Project
 
 	// 创建PostLoginProcessor并执行V3流程
 	postLoginProcessCtx := &gcloud.PostLoginProcessCtx{
-		Ctx:           ctx,
-		UnBindCurProj: true,
-	}
-	if param.UnbindOldBillingProj != nil {
-		postLoginProcessCtx.UnBindCurProj = *param.UnbindOldBillingProj
+		Ctx:   ctx,
+		Param: *param,
 	}
 	if err = gcloud.ProcessPostLoginV3(postLoginProcessCtx); err != nil {
 		postLoginProcessCtx.Result.Message += fmt.Sprintf("V3流程执行失败: %v", err)

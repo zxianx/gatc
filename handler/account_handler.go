@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gatc/base/ratelimit"
 	"gatc/base/response"
+	"gatc/base/zlog"
 	"gatc/service"
 	"gatc/service/gcloud"
 	"net/http"
@@ -162,6 +163,7 @@ func (h *AccountHandler) ProcessProjectsV3(c *gin.Context) {
 
 	result, err := h.projectService.ProcessProjectsV3(c, &param.ProjectProcessParam)
 	if err != nil {
+		zlog.ErrorWithCtx(c, "ProcessProjectsV3", err)
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

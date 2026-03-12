@@ -6,6 +6,7 @@ import (
 	"gatc/base/zlog"
 	"gatc/constants"
 	"gatc/dao"
+	"gatc/tool"
 	"math/rand"
 	"os/exec"
 	"strconv"
@@ -152,6 +153,14 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 	if err != nil {
 		zlog.InfoWithCtx(ctx.Ctx.GinCtx, "获取到CLI项目失败", err.Error())
 		return fmt.Errorf("获取CLI项目列表失败: %v", err)
+	}
+
+	if len(cliProjects) <= 1 {
+		if ctx.Param.FirstTimeProcess == nil {
+			ctx.Param.FirstTimeProcess = tool.NewPtr(true)
+			ctx.Param.MaxCreateProjNum -= len(cliProjects)
+			ctx.Param.UnbindOldBillingProj = tool.NewPtr(false)
+		}
 	}
 
 	// 转换为GCPProjectExt

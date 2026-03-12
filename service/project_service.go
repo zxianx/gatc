@@ -6,7 +6,9 @@ import (
 	"gatc/constants"
 	"gatc/dao"
 	"gatc/service/gcloud"
+	"gatc/tool"
 	"github.com/gin-gonic/gin"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -68,6 +70,15 @@ func (s *ProjectService) ProcessProjectsV3(c *gin.Context, param *gcloud.Project
 	if param != nil {
 		zlog.InfoWithCtx(c, "开始登录后处理流程ProcessProjectsV3", "邮箱", param.Email)
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			fmt.Printf("ProcessProjectsV3 登录后处理流程  panic recovered: %v\nStack trace:\n%s\n", r, buf[:n])
+			tool.BytesReplace(buf, '\n', '\t')
+			zlog.Error(c, "ProcessProjectsV3 登录后处理流程  panic", r, string(buf))
+		}
+	}()
 	accountStatus, err := dao.GGcpAccountDao.GetAccountStatus(c, param.Email)
 	if err != nil {
 		return &gcloud.ProjectProcessResult{

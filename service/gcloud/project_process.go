@@ -27,6 +27,7 @@ type ProjectProcessParam struct {
 	UnbindOldBillingProj *bool  `json:"unbind_old_billing_proj,omitempty"  form:"unbind_old_billing_proj,omitempty"`
 	MaxCreateProjNum     int    `json:"max_create_proj_num" form:"max_create_proj_num"`
 	BindCreateProj       *bool  `json:"bind_create_proj,omitempty" form:"bind_create_proj,omitempty"`
+	FirstTimeProcess     *bool  `json:"first_time_process,omitempty" form:"first_time_process,omitempty"`
 }
 
 func (p *ProjectProcessParam) Adapt() error {

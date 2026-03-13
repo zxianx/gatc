@@ -1298,7 +1298,7 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 		// vm_instances.proxy 格式: "http://IP:1081/px"
 		// proxy_pool.proxy 格式: "http://IP:1081"
 		proxyWithoutSuffix := strings.TrimSuffix(vm.Proxy, "/px")
-		if proxyWithoutSuffix != "" && vm.ProxyType == constants.ProxyTypeHttpProxyAlias {
+		if proxyWithoutSuffix != "" && (vm.ProxyType == constants.ProxyTypeHttpProxyAlias || vm.ProxyType == constants.ProxyTypeHttpProxy) {
 			set2Map[proxyWithoutSuffix] = &VMWithFlag{
 				VM:        vm,
 				Processed: false,

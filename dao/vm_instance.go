@@ -148,7 +148,7 @@ func (d *VMInstanceDao) GetActiveVMs(c *gin.Context) ([]VMInstance, error) {
 	zlog.InfoWithCtx(c, "Querying all active VMs")
 
 	var vms []VMInstance
-	err := helpers.GatcDbClient.Where("status == ?", constants.VMStatusRunning).Find(&vms).Error
+	err := helpers.GatcDbClient.Where("status = ?", constants.VMStatusRunning).Find(&vms).Error
 	if err != nil {
 		zlog.ErrorWithCtx(c, "Failed to query active VMs", err)
 		return nil, err

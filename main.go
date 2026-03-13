@@ -58,6 +58,7 @@ func main() {
 	extra_once_delay_run_time := 10 * time.Second
 	cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs, -1)
 	cron.AddFunc("Sync VMs with GCP", "@every 1h", service.GVmService.SyncVMsWithGCP, extra_once_delay_run_time)
+	cron.AddFunc("Sync Proxys by Vms", "@every 1m", service.GVmService.SyncVMsWithGCP, -1)
 	cron.AddFunc("Cleanup Pending Delete VMs", "@every 10m", service.GVmService.CleanupPendingDeleteVMs, -1)
 	cron.Start()
 

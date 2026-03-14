@@ -16,27 +16,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GCPProjectExt 扩展的GCP项目信息
-type GCPProjectExt struct {
-	GCPProject
-	BillingAccount string // 绑定的账单账户，nil表示还未获取
-	// Ext 为了一些信息可跨step用，避免重复代码
-	NewCreate bool
-}
-
 // GCPProject 基础项目信息
 type GCPProject struct {
 	ProjectID      string `json:"projectId"`
 	Name           string `json:"name"`
 	ProjectNumber  string `json:"projectNumber"`
 	LifecycleState string `json:"lifecycleState"`
+
+	// 以下是扩展字段
+	BillingAccount string // 绑定的账单账户，nil表示还未获取
+	NewCreate      bool
 }
 
 // PostLoginProcessCtx 跨步骤共享的处理上下文
 type PostLoginProcessCtx struct {
 	Param           ProjectProcessParam
 	Ctx             *WorkCtx                   `json:"-"`
-	CliProjectList  []GCPProjectExt            `json:"cli_project_list"` // CLI获取的项目列表
+	CliProjectList  []GCPProject               `json:"cli_project_list"` // CLI获取的项目列表
 	DbProjectsMp    map[string]*dao.GCPAccount `json:"db_projects_mp"`   // 数据库项目映射 projectId -> daoInstance
 	BillingAccounts []string                   `json:"billing_accounts"` // 可用的billing账户列表
 	Result          ProjectProcessResult       `json:"result"`           // V3新增：直接在上下文中设置结果
@@ -163,12 +159,6 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 		}
 	}
 
-	// 转换为GCPProjectExt
-	ctx.CliProjectList = make([]GCPProjectExt, len(cliProjects))
-	for i, p := range cliProjects {
-		ctx.CliProjectList[i] = GCPProjectExt{GCPProject: p}
-	}
-
 	zlog.InfoWithCtx(ctx.Ctx.GinCtx, "获取到CLI项目", "数量", len(ctx.CliProjectList))
 
 	// 2. 补充项目
@@ -184,9 +174,10 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 
 		// 添加创建的项目到列表
 		for _, projectID := range createdProjects {
-			ctx.CliProjectList = append(ctx.CliProjectList, GCPProjectExt{
-				GCPProject: GCPProject{ProjectID: projectID, Name: "GATC Project"},
-				NewCreate:  true,
+			ctx.CliProjectList = append(ctx.CliProjectList, GCPProject{
+				ProjectID: projectID,
+				Name:      "GATC Project",
+				NewCreate: true,
 			})
 		}
 
@@ -368,7 +359,7 @@ func getCLIProjects(workCtx *WorkCtx) ([]GCPProject, error) {
 
 	var projects []GCPProject
 	if err := json.Unmarshal(output, &projects); err != nil {
-		return nil, fmt.Errorf("解析项目JSON失败: str[%s] err: %v ", string(output), err)
+		return nil, fmt.Errorf("获取CLI项目列表解析JSON失败: str[%s] err: %v ", string(output), err)
 	}
 
 	return projects, nil

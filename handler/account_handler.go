@@ -7,6 +7,7 @@ import (
 	"gatc/base/zlog"
 	"gatc/service"
 	"gatc/service/gcloud"
+	"gatc/tool"
 	"net/http"
 	"time"
 
@@ -241,14 +242,97 @@ func (h *AccountHandler) DeleteAccounts(c *gin.Context) {
 
 	result, err := h.accountService.DeleteAccounts(c, &req.DeleteAccountParam)
 	if err != nil {
-		zlog.ErrorWithCtx(c, "删除账户失败", err)
+		zlog.ErrorWithMsgAndCtx(c, "删除账户失败", "error", err)
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	response.Success(c, map[string]interface{}{
+	response.Success(c, map[string]any{
 		"message":       "删除成功",
 		"deleted_count": result.DeletedCount,
 		"emails":        result.Emails,
 	})
+}
+
+// CreateProjBillingUnbindV4Request V4创建项目并解绑账单请求
+type CreateProjBillingUnbindV4Request struct {
+	gcloud.ProjectProcessV4Param
+}
+
+// CreateProjBillingUnbindV4 创建项目并解绑账单（V4）
+func (h *AccountHandler) CreateProjBillingUnbindV4(c *gin.Context) {
+	var req CreateProjBillingUnbindV4Request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
+		return
+	}
+
+	result, err := gcloud.CreateProjBillingUnbindV4(c, &req.ProjectProcessV4Param)
+	if err != nil {
+		zlog.ErrorWithMsgAndCtx(c, "CreateProjBillingUnbindV4 V4创建项目并解绑账单失败", "error", err)
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// KeyWithdrawKeySaveV4Request V4提取Key并保存请求
+type KeyWithdrawKeySaveV4Request struct {
+	gcloud.KeyWithdrawV4Param
+}
+
+// KeyWithdrawKeySaveV4 提取Key并保存（V4）
+func (h *AccountHandler) KeyWithdrawKeySaveV4(c *gin.Context) {
+	var req KeyWithdrawKeySaveV4Request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
+		return
+	}
+
+	var result *gcloud.KeyWithdrawKeySaveV4Result
+	var err error
+
+	// defer 检查：如果有失败或实际提取数小于待提项目数，异步触发同步
+	defer func() {
+		if result == nil {
+			return
+		}
+		// 条件：有失败项目，或者成功数小于处理数（意味着有失败）
+		if result.FailedTokens > 0 || result.SuccessTokens < result.ProcessedProjects {
+			zlog.InfoWithCtx(c, "KeyWithdrawKeySaveV4 触发异步同步",
+				"email", req.KeyWithdrawV4Param.Email,
+				"processed", result.ProcessedProjects,
+				"success", result.SuccessTokens,
+				"failed", result.FailedTokens)
+
+			// 异步执行同步，使用特殊参数调用 CreateProjBillingUnbindV4
+			go func(email string) {
+				// 创建一个新的 context 用于异步操作（复制必要信息）
+				syncParam := &gcloud.ProjectProcessV4Param{
+					Email:                email,
+					MaxCreateProjNum:     0,                  // 不创建新项目
+					UnbindOldBillingProj: tool.NewPtr(false), // 不解绑账单
+				}
+				// 使用 background context 避免依赖已完成的请求 context
+				syncResult, err := gcloud.CreateProjBillingUnbindV4(c, syncParam)
+				if err != nil {
+					zlog.ErrorWithMsgAndCtx(c, "KeyWithdrawKeySaveV4 异步同步失败", err, "email", email)
+				} else {
+					zlog.InfoWithCtx(c, "KeyWithdrawKeySaveV4 异步同步完成",
+						"email", email,
+						"result", syncResult.Message)
+				}
+			}(req.Email)
+		}
+	}()
+
+	result, err = gcloud.KeyWithdrawKeySaveV4(c, &req.KeyWithdrawV4Param)
+	if err != nil {
+		zlog.ErrorWithMsgAndCtx(c, "KeyWithdrawKeySaveV4 V4提取Key并保存失败", "error", err)
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, result)
 }

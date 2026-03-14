@@ -62,6 +62,18 @@ type ListAccountResult struct {
 	Items []dao.GCPAccount `json:"items"`
 }
 
+// DeleteAccountParam 删除账户参数
+type DeleteAccountParam struct {
+	Email  string   `json:"email,omitempty" form:"email"`
+	Emails []string `json:"emails,omitempty"`
+}
+
+// DeleteAccountResult 删除账户返回结果
+type DeleteAccountResult struct {
+	DeletedCount int64    `json:"deleted_count"`
+	Emails       []string `json:"emails"`
+}
+
 type GcpAccountService struct{}
 
 var GGcpAccountService = &GcpAccountService{}
@@ -473,4 +485,40 @@ func (s *GcpAccountService) updateAccountVMInfo(c *gin.Context, email string, ne
 	zlog.InfoWithCtx(c, "账户VM信息更新完成", "email", email, "updatedRows", result.RowsAffected, "newVmId", newVMInstance.VMID)
 
 	return nil
+}
+
+// DeleteAccounts 删除账户（支持单个或批量）
+func (s *GcpAccountService) DeleteAccounts(c *gin.Context, param *DeleteAccountParam) (*DeleteAccountResult, error) {
+	result := &DeleteAccountResult{
+		Emails: make([]string, 0),
+	}
+
+	// 优先处理批量删除
+	if len(param.Emails) > 0 {
+		zlog.InfoWithCtx(c, "批量删除账户", "emails", param.Emails)
+		count, err := dao.GGcpAccountDao.DeleteByEmails(c, param.Emails)
+		if err != nil {
+			return nil, fmt.Errorf("批量删除账户失败: %v", err)
+		}
+		result.DeletedCount = count
+		result.Emails = param.Emails
+		zlog.InfoWithCtx(c, "批量删除账户成功", "count", count, "emails", param.Emails)
+		return result, nil
+	}
+
+	// 单个删除
+	if param.Email == "" {
+		return nil, fmt.Errorf("邮箱不能为空")
+	}
+
+	zlog.InfoWithCtx(c, "删除单个账户", "email", param.Email)
+	count, err := dao.GGcpAccountDao.DeleteByEmail(c, param.Email)
+	if err != nil {
+		return nil, fmt.Errorf("删除账户失败: %v", err)
+	}
+	result.DeletedCount = count
+	result.Emails = []string{param.Email}
+	zlog.InfoWithCtx(c, "删除账户成功", "count", count, "email", param.Email)
+
+	return result, nil
 }

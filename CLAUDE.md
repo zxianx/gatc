@@ -2,197 +2,298 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## 项目概述
 
-GATC (Google Account Token Collector) is a Go-based automated system for managing Google Cloud Platform (GCP) accounts and virtual machines to obtain Gemini API tokens. The system uses a "white account" (stable GCP account) to create VMs and manages multiple user accounts through an automated registration and project creation workflow.
+GATC (Google Account Token Collector) 是一个基于 Go 的自动化系统，用于管理 Google Cloud Platform (GCP) 账户和虚拟机以获取 Gemini API Token。系统使用"白账户"（稳定的 GCP 账户）创建 VM，并通过自动化注册和项目创建工作流管理多个用户账户。
 
-## Architecture
+## 架构
 
-### High-Level Components
+### 分层架构
 
-**Core Services:**
-- `service/gcp_account_service.go`: Manages GCP account registration, authentication, and lifecycle
-- `service/vm_service.go`: Handles VM creation, deletion, and management on GCP
-- `service/project_service.go`: Manages GCP project creation, billing, and token generation
-- `service/gcloud/`: Contains specialized gcloud CLI automation components
+项目采用经典的分层架构：
 
-**Data Layer:**
-- `dao/gcp_account.go`: GCP account database operations with complex status tracking
-- `dao/vm_instance.go`: VM instance database operations
-- Database models support account-project relationships, billing status, token status, and VM associations
-
-**Infrastructure:**
-- `base/zlog/`: Structured logging with request ID tracking and caller skip configuration
-- `base/config/`: GCP configuration management including SSH keys and project settings
-- `handlers/`: HTTP API endpoints for VM and account management
-
-### Key Data Models
-
-**GCPAccount**: Tracks account email, project ID, billing status, token status, VM association, and authentication status. Uses composite unique index on email+project for multi-project per account support.
-
-**VMInstance**: Manages VM lifecycle with SSH connectivity, SOCKS5 proxy configuration, and GCP integration verification.
-
-### VM Integration Pattern
-
-The system implements intelligent VM reuse:
-- `ForceCreateVm` flag controls VM creation strategy (default: false for smart reuse)
-- VM validation includes both database status and real GCP existence verification via gcloud CLI
-- Automatic cleanup of invalid VM associations and account data synchronization
-- New VMs are created with SOCKS5 proxy and gcloud CLI via initialization script
-
-### Authentication Workflow
-
-The account registration follows a sophisticated multi-step process:
-1. VM selection/creation with validation
-2. gcloud auth login session management with retry logic
-3. Account status verification with multiple authentication states
-4. Project creation and billing attachment automation
-5. API token generation and storage
-
-## Development Commands
-
-### Building and Running
-
-**Local Development:**
-```bash
-# Setup development environment
-make dev-setup
-
-# Build the application
-make build
-
-# Run locally
-make dev
-
-# Run with auto-reload (requires 'air' tool)
-make dev-watch
-
-# Run tests
-make test
+```
+HTTP API (handler/)
+    ↓
+Service Layer (service/)
+    ↓
+Data Access Layer (dao/)
+    ↓
+Database (MySQL)
 ```
 
-**Direct Go commands:**
+### 核心组件
+
+**Service 层：**
+- `service/vm_service.go`: VM 生命周期管理（创建、删除、状态同步、定时清理）
+- `service/gcp_account_service.go`: GCP 账户注册流程管理，协调 gcloud 子包完成认证
+- `service/project_service.go`: GCP 项目创建、账单绑定、API Token 获取
+- `service/gcloud/`: gcloud CLI 自动化核心包
+  - `login_session.go`: 基于 SSH 的交互式 gcloud auth login 会话管理
+  - `account_auth_login.go`: 账户认证流程
+  - `project_process.go`: 项目创建和处理流程
+  - `post_login_process_v2.go`: 登录后的项目配置和 Token 获取
+
+**DAO 层：**
+- `dao/gcp_account.go`: GCP 账户数据模型，支持 email+project_id 复合唯一索引，实现多项目 per 账户
+- `dao/vm_instance.go`: VM 实例数据模型，管理 VM 生命周期和代理配置
+
+**基础设施：**
+- `base/zlog/`: 基于 zap 的结构化日志，支持请求 ID 追踪
+- `base/config/`: GCP 配置管理（SSH 密钥、白账户项目 ID）
+- `base/ratelimit/`: 基于邮箱的请求频率限制（10 分钟滑动窗口）
+- `cron/`: 基于 robfig/cron 的定时任务管理
+
+### 关键数据模型
+
+**GCPAccount** (`dao/gcp_account.go`):
+- 账单状态：`BillingStatusUnbound`(0), `BillingStatusBound`(1), `BillingStatusDetach`(2)
+- Token 状态：`TokenStatusNone`(0), `TokenStatusCreateFail`(1), `TokenStatusGot`(2), `TokenStatusInvalid`(3)
+- 认证状态：`AuthStatusNotLogin`(0), `AuthStatusLoggedIn`(1), `AuthStatusLoginFailed`(2), `AuthStatusVMError`(3)
+- 复合唯一索引：email + project_id，支持一个邮箱多个项目
+
+**VMInstance** (`dao/vm_instance.go`):
+- 状态：`VMStatusRunning`(1), `VMStatusStopped`(2), `VMStatusDeleted`(3), `VMStatusPendingDelete`(4)
+- 代理类型：socks5(默认), tinyproxy, httpProxyServer
+- SSH 连接信息：外部 IP、内部 IP、SSH 用户名、密钥内容
+
+### 单例模式
+
+项目广泛使用包级全局单例：
+
+```go
+// service 层
+var GVmService = &VMService{}
+var GGcpAccountService = &GcpAccountService{}
+var GProjectService = &ProjectService{}
+
+// dao 层
+var GGcpAccountDao = &GcpAccountDao{}
+var GVmInstanceDao = &VMInstanceDao{}
+
+// gcloud 包
+var GAuthSessionSessionCache = &AuthSessionSessionCache{}
+```
+
+### WorkCtx 工作上下文
+
+`service/gcloud/common.go` 中定义的 WorkCtx 贯穿整个认证流程：
+
+```go
+type WorkCtx struct {
+    SessionID  string          // 会话 ID，用于追踪
+    Email      string          // 当前处理的邮箱
+    VMInstance *dao.VMInstance // 关联的 VM 实例
+    GinCtx     *gin.Context    // HTTP 上下文
+}
+```
+
+### VM 智能复用策略
+
+- `ForceCreateVm` 参数控制 VM 创建策略（默认 false，启用智能复用）
+- VM 验证包括数据库状态和 GCP 实际存在性双重校验（通过 gcloud CLI）
+- 自动清理无效的 VM 关联，同步账户数据
+- 新 VM 通过初始化脚本安装 gcloud CLI 和 SOCKS5 代理
+
+### 认证会话状态机
+
+`service/gcloud/login_session.go` 实现自动化 gcloud 认证：
+
+```go
+type AuthStatus int
+const (
+    AuthSessionStatusNone       AuthStatus = 0
+    AuthSessionStatusBeginLogin AuthStatus = 2
+    AuthSessionStatusWaitKey    AuthStatus = 3  // 等待用户输入授权码
+    AuthSessionStatusGetKey     AuthStatus = 4  // 已获取授权码
+    AuthSessionStatusDone       AuthStatus = 10 // 认证完成
+    AuthSessionStatusFail       AuthStatus = 11 // 认证失败
+)
+```
+
+流程：SSH 到 VM → 执行 `gcloud auth login --no-launch-browser` → 解析输出获取授权 URL → 用户完成授权后提交授权码 → 完成认证。
+
+## 开发命令
+
+### 本地开发
+
 ```bash
-go build -o gatc .
+# 直接运行（需要本地配置文件）
 go run .
+
+# 构建二进制
+go build -o gatc .
+
+# 依赖管理
 go mod tidy
+
+# 运行测试
+go test ./...
+
+# 运行单个测试
+go test -v ./base/ratelimit/...
 ```
 
-### Configuration Requirements
+### Docker 构建与部署
 
-The application expects configuration files in `./conf/`:
-- `conf.yaml`: Application settings (port: 5401)
-- `resource.yaml`: Resource configuration
-- `gcp/sa-key0.json`: Service account key for the white account
-- `gcp/gatc_rsa` and `gcp/gatc_rsa.pub`: SSH key pair for VM access
+```bash
+# 构建镜像
+docker build -t gatc .
 
-Environment detection through `env.DevLocalEnv` loads dev-specific configs from `./conf/dev/`.
+# 生产部署（配置通过 volume 挂载）
+docker compose -f docker-compose.gatc.prod.yml up -d
 
-### Database Operations
+# 强制重建
+docker compose -f docker-compose.gatc.prod.yml up -d --force-recreate
+```
 
-The application uses GORM with MySQL for data persistence. Database tables are auto-migrated on startup:
-- `gcp_accounts`: Account and project tracking
-- `vm_instances`: VM lifecycle management
+## 配置要求
 
-Key status constants are defined in `dao/gcp_account.go` for billing, token, and authentication states.
+### 配置文件结构
 
-### VM Management
+```
+./conf/
+├── conf.yaml           # 应用配置（端口等）
+├── resource.yaml       # 资源配置（MySQL 连接）
+├── gcp/
+│   ├── sa-key0.json    # 白账户服务账户密钥
+│   ├── gatc_rsa        # SSH 私钥（权限 600）
+│   └── gatc_rsa.pub    # SSH 公钥
+└── dev/                # 开发环境配置覆盖
+    ├── conf.yaml
+    └── resource.yaml
+```
 
-VMs are created with standardized configuration:
-- Zone: `us-central1-a`
-- Machine type: `e2-small`
-- Initialization script: `./scripts/vm_init.sh` (installs gcloud CLI and SOCKS5 proxy)
-- SSH access via generated key pairs
-- SOCKS5 proxy on port 1080
+### 环境检测
 
-### API Endpoints
+`env/env.go` 检测主机名（含 "macbook" 或 "local" 则为开发环境），自动切换配置路径：
+- 开发环境：`./conf/dev/`
+- 生产环境：`./conf/`
 
-**VM Management (`/api/v1/vm/`):**
-- `POST /create`: Create new VM instance
-- `POST /delete`: Delete VM instance  
-- `GET /list`: List VMs with pagination
-- `GET /get`: Get specific VM details
-- `POST /refresh-ip`: Update VM external IP
+### 配置加载顺序
 
-**Account Management (`/api/v1/account/`):**
-- `GET /start-registration`: Initiate account registration flow
-- `GET /submit-auth-key`: Complete authentication with user-provided key
-- `GET /list`: List accounts with filtering
-- `GET /process-projects-v2`: Execute project processing workflow
-- `POST|GET /set-token-invalid`: Mark tokens as invalid
-- `GET /emails-with-unbound-projects`: Get emails needing billing setup
+1. `env.Init()` 检测环境
+2. `conf.LoadAppConfig()` 加载应用配置
+3. `conf.LoadResourceConf()` 加载资源配置
+4. `zlog.InitLogger()` 初始化日志
+5. `helpers.InitMysql()` 初始化数据库连接
+6. `config.InitGCPConfig()` 初始化 GCP 配置（读取 SSH 密钥和白账户项目 ID）
 
-### Logging
+## API 端点
 
-The system uses structured logging via zap with:
-- Request ID correlation across service calls
-- Context-aware logging methods (`InfoWithCtx`, `ErrorWithCtx`)
-- Caller information properly configured with skip levels
+### VM 管理 (`/api/v1/vm/`)
 
-### gcloud CLI Integration
+- `POST /create` - 创建 VM，支持 ForceCreateVm 参数控制复用策略
+- `POST /delete` - 删除 VM
+- `GET /list` - 分页查询 VM 列表
+- `GET /get` - 获取单个 VM 详情
+- `POST /refresh-ip` - 刷新 VM 外部 IP
+- `POST /replace-proxy-resource` - 替换 VM 代理资源
+- `POST /replace-proxy-resource-v2` - 替换 VM 代理资源 V2
 
-The `service/gcloud/` package provides sophisticated automation:
-- SSH-based command execution on remote VMs
-- Authentication session management with state tracking
-- Project creation and billing automation
-- API token extraction and validation
+### 账户管理 (`/api/v1/account/`)
 
-Critical workflow components:
-- `WorkCtx`: Encapsulates session, email, VM instance, and Gin context
-- Account status detection: `active`, `inactive`, `not_login`
-- Retry mechanisms for VM initialization delays
-- Session caching for multi-step authentication flows
+- `GET /start-registration` - 开始账户注册流程，返回授权 URL 和 session_id
+- `GET /submit-auth-key` - 提交 gcloud 授权码完成认证
+- `GET /list` - 查询账户列表，支持按状态过滤
+- `GET /process-projects` - 执行完整项目处理流程（登录 → 创建项目 → 绑卡 → 获取 Token）
+- `GET /process-projects-v2` - 项目处理流程 V2
+- `GET /process-projects-v3` - 项目处理流程 V3（最新）
+- `POST|GET /set-token-invalid` - 标记 Token 失效
+- `GET /emails-with-unbound-projects` - 获取有未绑账单项目的邮箱列表
 
-## Containerization
+## 定时任务
 
-### Docker Setup
-The application is containerized with multi-stage builds:
-- **Builder stage**: Uses `golang:1.22-alpine` for compilation
-- **Runtime stage**: Uses `debian:12-slim` with gcloud CLI pre-installed
-- **Security**: Runs as non-root user with proper file permissions
-- **Health checks**: Built-in health monitoring on port 5401
+`main.go` 中注册的定时任务：
 
-### CI/CD Pipeline
-GitHub Actions workflow includes:
-- **Testing**: Go vet, unit tests, and build verification
-- **Security**: Trivy vulnerability scanning with SARIF upload
-- **Container Registry**: Automatic image builds pushed to GitHub Container Registry
-- **Multi-platform**: Supports both linux/amd64 and linux/arm64
-- **Environment Deployment**: Separate staging and production deployment jobs
+```go
+// 每小时清理 24 小时前的 VM
+cron.AddFunc("Cleanup 24H ago VMs", "@every 1h", service.GVmService.CleanupOldVMs, -1)
 
-### Deployment Options
-- **Local development**: Direct Go execution with local configuration
-- **Production deployment**: Docker containers with volume-mounted configuration
-- **Kubernetes ready**: Health checks and proper signal handling
+// 每小时同步 VM 状态与 GCP
+cron.AddFunc("Sync VMs with GCP", "@every 1h", service.GVmService.SyncVMsWithGCP, 10s)
 
-### Production Configuration
-Host directory structure for production deployment:
+// 每分钟同步代理信息
+cron.AddFunc("Sync Proxys by Vms", "@every 1m", service.SyncProxyByVms, -1)
+
+// 每 10 分钟清理预删除状态的 VM
+cron.AddFunc("Cleanup Pending Delete VMs", "@every 10m", service.GVmService.CleanupPendingDeleteVMs, -1)
+```
+
+## 核心常量
+
+定义在 `constants/constants.go` 和 `dao/gcp_account.go`：
+
+```go
+// VM 配置
+DefaultZone           = "us-central1-a"
+DefaultMachineType    = "e2-small"
+MaxProjectsPerAccount = 12
+
+// 路径配置
+WhiteAccountKeyPath = "./conf/gcp/sa-key0.json"
+SSHKeyPath          = "./conf/gcp/gatc_rsa"
+SSHPubKeyPath       = "./conf/gcp/gatc_rsa.pub"
+VMInitScriptPath    = "./scripts/vm_init.sh"
+
+// VM 状态
+VMStatusRunning       = 1
+VMStatusStopped       = 2
+VMStatusDeleted       = 3
+VMStatusPendingDelete = 4
+```
+
+## 数据库
+
+使用 GORM v2 + MySQL，启动时自动迁移：
+
+```go
+helpers.GatcDbClient.AutoMigrate(
+    &dao.VMInstance{},
+    &dao.GCPAccount{},
+)
+```
+
+## 日志规范
+
+使用 `base/zlog` 包，支持请求 ID 上下文：
+
+```go
+// 带上下文的日志
+zlog.InfoWithCtx(c, "message", "key", value)
+zlog.ErrorWithCtx(c, "message", err, "key", value)
+
+// 普通日志
+zlog.Info("message", "key", value)
+zlog.Error("message", err)
+```
+
+## Docker 多阶段构建
+
+**Builder 阶段：** `golang:1.22-alpine`
+- 下载依赖并编译二进制
+
+**Runtime 阶段：** `gcr.io/google.com/cloudsdktool/google-cloud-cli:latest`
+- 预装 gcloud CLI
+- 安装 openssh-client、curl、net-tools
+- 创建非 root 用户 `gatc`
+- 暴露端口 5401
+- 健康检查：`GET /health`
+
+## 生产部署目录结构
+
 ```
 /opt/gatc/
-├── conf/                    # Mounted to /app/conf in container
-│   ├── conf.yaml           # Application settings
-│   ├── resource.yaml       # Database and resource config  
-│   ├── gcp/                # GCP credentials (permissions 700)
-│   │   ├── sa-key0.json    # Service account key
-│   │   ├── gatc_rsa        # SSH private key (permissions 600)
-│   │   └── gatc_rsa.pub    # SSH public key
-│   └── dev/                # Development overrides
-└── mysql/                   # MySQL data directory
+├── conf/                    # 挂载到容器 /app/conf
+│   ├── conf.yaml
+│   ├── resource.yaml
+│   └── gcp/
+│       ├── sa-key0.json
+│       ├── gatc_rsa
+│       └── gatc_rsa.pub
+└── mysql/                   # MySQL 数据目录
 ```
 
-### Deployment Commands
-```bash
-# Initial setup
-make setup-host              # Creates /opt/gatc structure
-make deploy-prod             # Deploy with docker-compose.prod.yml
-
-# Operations  
-make prod-logs               # View logs
-make prod-restart            # Restart application
-make prod-stop               # Stop all services
-```
-
-### Health Monitoring
-- **Application**: `GET /health` endpoint returns service status
-- **Container**: Built-in Docker health checks
-- **Database**: Connection validation through application
+配置文件权限：
+- `conf/gcp/` 目录：700
+- `gatc_rsa` 私钥：600

@@ -112,6 +112,7 @@ func setupRoutes(r *gin.Engine) {
 			//account.POST("/submit-auth-key", accountHandler.SubmitAuthKey)
 			account.GET("/submit-auth-key", accountHandler.SubmitAuthKey) // 支持GET回调
 			account.GET("/list", accountHandler.ListAccounts)
+			account.POST("/delete", accountHandler.DeleteAccounts)                                    // 删除账户（支持批量）
 			account.GET("/process-projects-v2", accountHandler.ProcessProjectsV2)                     // 项目处理流程V2（新的5步流程），参数：email
 			account.GET("/process-projects-v3", accountHandler.ProcessProjectsV3)                     // 项目处理流程V2（新的5步流程），参数：email
 			account.GET("/process-projects", accountHandler.ProcessProjectsV3)                        // 项目处理流程V2（新的5步流程），参数：email

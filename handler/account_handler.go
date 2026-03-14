@@ -218,3 +218,37 @@ func (h *AccountHandler) GetEmailsWithUnboundProjects(c *gin.Context) {
 		"count":  len(emails),
 	})
 }
+
+// DeleteAccountsRequest 删除账户请求结构
+type DeleteAccountsRequest struct {
+	service.DeleteAccountParam
+}
+
+// DeleteAccounts 删除账户（支持单个或批量）
+func (h *AccountHandler) DeleteAccounts(c *gin.Context) {
+	var req DeleteAccountsRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid request parameters: "+err.Error())
+		return
+	}
+
+	// 验证参数
+	if req.Email == "" && len(req.Emails) == 0 {
+		response.Error(c, http.StatusBadRequest, "邮箱不能为空，请提供 email 或 emails 参数")
+		return
+	}
+
+	result, err := h.accountService.DeleteAccounts(c, &req.DeleteAccountParam)
+	if err != nil {
+		zlog.ErrorWithCtx(c, "删除账户失败", err)
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, map[string]interface{}{
+		"message":       "删除成功",
+		"deleted_count": result.DeletedCount,
+		"emails":        result.Emails,
+	})
+}

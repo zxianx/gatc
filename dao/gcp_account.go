@@ -184,3 +184,15 @@ func (d *GcpAccountDao) GetEmailsWithUnboundProjects(c *gin.Context) ([]string, 
 		Pluck("email", &emails).Error
 	return emails, err
 }
+
+// DeleteByEmail 根据邮箱硬删除所有账户记录
+func (d *GcpAccountDao) DeleteByEmail(c *gin.Context, email string) (int64, error) {
+	result := helpers.GatcDbClient.WithContext(c).Where("email = ?", email).Delete(&GCPAccount{})
+	return result.RowsAffected, result.Error
+}
+
+// DeleteByEmails 批量根据邮箱硬删除账户记录
+func (d *GcpAccountDao) DeleteByEmails(c *gin.Context, emails []string) (int64, error) {
+	result := helpers.GatcDbClient.WithContext(c).Where("email IN ?", emails).Delete(&GCPAccount{})
+	return result.RowsAffected, result.Error
+}

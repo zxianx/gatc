@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
@@ -382,6 +383,8 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 			proxyType = constants.ProxyTypeTinyProxy
 		} else if param.ProxyType == constants.ProxyTypeHttpProxy || param.ProxyType == constants.ProxyTypeHttpProxyAlias {
 			proxyType = constants.ProxyTypeHttpProxy
+		} else if param.ProxyType == constants.ProxyTypeAll {
+			proxyType = constants.ProxyTypeAll
 		}
 	}
 
@@ -412,6 +415,8 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 		initScriptPath = constants.VMInitScriptTinyProxyPath
 	} else if proxyType == constants.ProxyTypeHttpProxy {
 		initScriptPath = constants.VMInitScriptHttpProxyPath
+	} else if proxyType == constants.ProxyTypeAll {
+		initScriptPath = constants.VMInitScriptAllPath
 	} else {
 		initScriptPath = constants.VMInitScriptPath
 	}
@@ -461,7 +466,20 @@ func (s *VMService) CreateVM(c *gin.Context, param *CreateVMParam) (*CreateVMRes
 
 	// 根据代理类型构建代理地址
 	var proxyAuth string
-	if proxyType == constants.ProxyTypeTinyProxy {
+	if proxyType == constants.ProxyTypeAll {
+		// all 类型：生成 JSON 格式包含三种代理
+		proxyMap := map[string]string{
+			"socks5":          fmt.Sprintf("%s:%s@%s:1080", proxyUsername, proxyPassword, externalIP),
+			"tinyproxy":       fmt.Sprintf("http://%s:8080", externalIP),
+			"httpProxyServer": fmt.Sprintf("http://%s:1081/px", externalIP),
+		}
+		proxyJSON, err := json.Marshal(proxyMap)
+		if err != nil {
+			zlog.ErrorWithCtx(c, "Failed to marshal proxy map to JSON", err)
+			return nil, fmt.Errorf("failed to marshal proxy map: %v", err)
+		}
+		proxyAuth = string(proxyJSON)
+	} else if proxyType == constants.ProxyTypeTinyProxy {
 		// TinyProxy HTTP代理使用8080端口，不使用认证
 		proxyAuth = fmt.Sprintf("http://%s:8080", externalIP)
 	} else if proxyType == constants.ProxyTypeHttpProxy {
@@ -751,6 +769,8 @@ func (s *VMService) BatchCreateVM(c *gin.Context, param *BatchCreateVMParam) (*B
 			proxyType = constants.ProxyTypeTinyProxy
 		} else if param.ProxyType == constants.ProxyTypeHttpProxy || param.ProxyType == constants.ProxyTypeHttpProxyAlias {
 			proxyType = constants.ProxyTypeHttpProxy
+		} else if param.ProxyType == constants.ProxyTypeAll {
+			proxyType = constants.ProxyTypeAll
 		}
 	}
 
@@ -936,12 +956,21 @@ func (s *VMService) SyncVMsWithGCP() {
 					Status:      constants.VMStatusRunning,
 					SSHUser:     "gatc", // 默认SSH用户
 				}
-				//
-				if strings.Contains(gcpVM.Name, strings.ToLower(constants.ProxyTypeHttpProxy)) {
+				// 根据VM名称判断代理类型，只处理 httpProxyServer 类型和 all 类型中的 httpProxyServer
+				vmNameLower := strings.ToLower(gcpVM.Name)
+				if strings.Contains(vmNameLower, strings.ToLower(constants.ProxyTypeHttpProxy)) {
 					newVM.ProxyType = constants.ProxyTypeHttpProxy
 					newVM.Proxy = "http://" + gcpVM.ExternalIP + ":1081/px"
-				} // todo 其他代理类型
-
+				} else if strings.Contains(vmNameLower, strings.ToLower(constants.ProxyTypeAll)) {
+					// all 类型：只记录 httpProxyServer 代理信息
+					newVM.ProxyType = constants.ProxyTypeAll
+					newVM.Proxy = tool.ToJson(map[string]string{
+						"socks5":          "", // 从cli sync 无密码信息
+						"tinyproxy":       "http://" + gcpVM.ExternalIP + ":8080",
+						"httpProxyServer": "http://" + gcpVM.ExternalIP + ":1081/px",
+					})
+				}
+				// socks5 和 tinyproxy 类型不处理，不设置 Proxy 字段
 				toInsertVMs = append(toInsertVMs, newVM)
 			}
 		}
@@ -1297,13 +1326,26 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 	for _, vm := range set2 {
 		// vm_instances.proxy 格式: "http://IP:1081/px"
 		// proxy_pool.proxy 格式: "http://IP:1081"
-		proxyWithoutSuffix := strings.TrimSuffix(vm.Proxy, "/px")
-		if proxyWithoutSuffix != "" && (vm.ProxyType == constants.ProxyTypeHttpProxyAlias || vm.ProxyType == constants.ProxyTypeHttpProxy) {
-			set2Map[proxyWithoutSuffix] = &VMWithFlag{
-				VM:        vm,
-				Processed: false,
+
+		if vm.ProxyType == constants.ProxyTypeHttpProxyAlias || vm.ProxyType == constants.ProxyTypeHttpProxy {
+			proxyWithoutSuffix := strings.TrimSuffix(vm.Proxy, "/px")
+			if proxyWithoutSuffix != "" {
+				set2Map[proxyWithoutSuffix] = &VMWithFlag{
+					VM:        vm,
+					Processed: false,
+				}
+			}
+		} else if vm.ProxyType == constants.ProxyTypeAll {
+			httpServeProxy := gjson.Get(vm.Proxy, "httpProxyServer").String()
+			proxyWithoutSuffix := strings.TrimSuffix(httpServeProxy, "/px")
+			if proxyWithoutSuffix != "" {
+				set2Map[proxyWithoutSuffix] = &VMWithFlag{
+					VM:        vm,
+					Processed: false,
+				}
 			}
 		}
+
 	}
 	zlog.InfoWithCtx(c, "SyncProxyPoolFromVMs, Built VM proxy map", "count", len(set2Map))
 

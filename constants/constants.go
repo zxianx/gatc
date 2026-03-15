@@ -9,6 +9,7 @@ const (
 	VMInitScriptPath          = "./scripts/vm_init.sh"
 	VMInitScriptTinyProxyPath = "./scripts/vm_init_tinyproxy.sh"
 	VMInitScriptHttpProxyPath = "./scripts/vm_init_httpproxy.sh"
+	VMInitScriptAllPath       = "./scripts/vm_init_all.sh"
 
 	// SSH密钥配置
 	SSHKeyPath    = "./conf/gcp/gatc_rsa"
@@ -28,4 +29,5 @@ const (
 	ProxyTypeTinyProxy      = "tinyproxy"
 	ProxyTypeHttpProxy      = "httpProxyServer"
 	ProxyTypeHttpProxyAlias = "server"
+	ProxyTypeAll            = "all" // 同时支持三种代理类型
 )

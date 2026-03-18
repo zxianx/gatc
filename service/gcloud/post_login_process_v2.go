@@ -163,7 +163,7 @@ func PostLoginProcessStep1ProjectSetup(ctx *PostLoginProcessCtx) error {
 
 	// 2. 补充项目
 	targetCount := ctx.Param.MaxCreateProjNum + len(ctx.CliProjectList)
-	if len(ctx.CliProjectList) < targetCount {
+	if len(ctx.CliProjectList) <= targetCount {
 		createdCount := targetCount - len(ctx.CliProjectList)
 		createdProjects, err := createProjects(ctx.Ctx, createdCount)
 		if err != nil {

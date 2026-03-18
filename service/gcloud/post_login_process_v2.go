@@ -754,7 +754,7 @@ func insertOfficialToken(ginCtx *gin.Context, email string, project dao.GCPAccou
 	}
 
 	//todo 配置
-	if strings.Contains(project.Sock5Proxy, "/px") {
+	if strings.Contains(project.Sock5Proxy, ":"+strconv.Itoa(constants.ProxyHttpServerProxyPort)) {
 		// https://generativelanguage.googleapis.com
 		// 1号1p， 设置个不存在的ip， 走后续流程替换成合适的
 		// officialToken.BaseUrl = strings.TrimRight(project.Sock5Proxy, "/") + "/" + "https%3A%2F%2Fgenerativelanguage.googleapis.com"

@@ -27,8 +27,6 @@ from_vm 字段：0表示非VM来源，>0表示来自VM（将来可以存储vmId�
 
 import (
 	"gatc/helpers"
-	"time"
-
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -85,8 +83,7 @@ func (d *ProxyPoolDao) BatchUpdateStatus(c *gin.Context, proxyIDs []int64, statu
 	return getDB(c).Model(&ProxyPool{}).
 		Where("id IN ?", proxyIDs).
 		Updates(map[string]interface{}{
-			"status":     status,
-			"updated_at": time.Now(),
+			"status": status,
 		}).Error
 }
 

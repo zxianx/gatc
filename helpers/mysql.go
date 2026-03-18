@@ -30,7 +30,7 @@ func initMysqlClient(conf conf.MysqlConf) (client *gorm.DB, err error) {
 		dsn = conf.Dsn
 	} else {
 		dsn = fmt.Sprintf(
-			"%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=True&loc=UTC&time_zone=%27%2B00%3A00%27&interpolateParams=%s&charset=utf8mb4",
+			"%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=True&loc=UTC&time_zone=%%27%%2B00%%3A00%%27&interpolateParams=%s&charset=utf8mb4",
 			conf.User,
 			conf.Password,
 			conf.Addr,

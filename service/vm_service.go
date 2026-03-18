@@ -1076,8 +1076,6 @@ func (s *VMService) ReplaceProxyResource(c *gin.Context, param *ReplaceProxyReso
 			ProxyType: constants.ProxyTypeHttpProxyAlias,
 			Status:    dao.ProxyStatusActive,
 			FromVM:    1, // 标记为来自VM
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
 		})
 	}
 
@@ -1389,8 +1387,6 @@ func (s *VMService) SyncProxyPoolFromVMs(c *gin.Context) (res SyncProxyPoolFromV
 				ProxyType: constants.ProxyTypeHttpProxyAlias,
 				Status:    dao.ProxyStatusActive,
 				FromVM:    1, // 标记为来自VM
-				CreatedAt: time.Now(),
-				UpdatedAt: time.Now(),
 			})
 			res.AddProxies = append(res.AddProxies, proxy)
 		}

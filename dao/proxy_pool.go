@@ -41,13 +41,13 @@ const (
 )
 
 type ProxyPool struct {
-	ID        int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	Status    int64     `gorm:"column:status;not null;default:0" json:"status"`
-	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
-	Proxy     string    `gorm:"column:proxy;not null" json:"proxy"`
-	ProxyType string    `gorm:"column:proxy_type;not null" json:"proxy_type"`
-	FromVM    int64     `gorm:"column:from_vm;not null;default:0" json:"from_vm"` // 0表示非VM来源，>0表示来自VM
+	ID     int64 `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	Status int64 `gorm:"column:status;not null;default:0" json:"status"`
+	//CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
+	//UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
+	Proxy     string `gorm:"column:proxy;not null" json:"proxy"`
+	ProxyType string `gorm:"column:proxy_type;not null" json:"proxy_type"`
+	FromVM    int64  `gorm:"column:from_vm;not null;default:0" json:"from_vm"` // 0表示非VM来源，>0表示来自VM
 }
 
 func (ProxyPool) TableName() string {

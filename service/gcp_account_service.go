@@ -502,7 +502,9 @@ func (s *GcpAccountService) DeleteAccounts(c *gin.Context, param *DeleteAccountP
 		}
 		result.DeletedCount = count
 		result.Emails = param.Emails
-		zlog.InfoWithCtx(c, "批量删除账户成功", "count", count, "emails", param.Emails)
+		tmp := &dao.GormOfficialTokens{}
+		affect, delTokenErr := tmp.DeleteGcpTokenByEmails(c, param.Emails)
+		zlog.InfoWithCtx(c, "批量删除账户成功", "count", count, "emails", param.Emails, "delTokenErr", delTokenErr, "delTokenAffect", affect)
 		return result, nil
 	}
 
@@ -518,7 +520,8 @@ func (s *GcpAccountService) DeleteAccounts(c *gin.Context, param *DeleteAccountP
 	}
 	result.DeletedCount = count
 	result.Emails = []string{param.Email}
-	zlog.InfoWithCtx(c, "删除账户成功", "count", count, "email", param.Email)
-
+	tmp := &dao.GormOfficialTokens{}
+	affect, delTokenErr := tmp.DeleteGcpTokenByEmails(c, result.Emails)
+	zlog.InfoWithCtx(c, "批量删除账户成功", "count", count, "emails", param.Email, "delTokenErr", delTokenErr, "delTokenAffect", affect)
 	return result, nil
 }

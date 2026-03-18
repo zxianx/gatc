@@ -736,9 +736,9 @@ func insertOfficialToken(ginCtx *gin.Context, email string, project dao.GCPAccou
 	now := time.Now()
 
 	officialToken := &dao.GormOfficialTokens{
-		ChannelId: 16,                                          // 固定16
-		Name:      "gatc-" + strconv.FormatInt(project.ID, 10), // 固定
-		Token:     project.OfficialToken,                       // token
+		ChannelId: constants.GcpChanId,                                       // 固定16
+		Name:      "gatc-" + email + "-" + strconv.FormatInt(project.ID, 10), // 固定
+		Token:     project.OfficialToken,                                     // token
 		//Proxy:     project.Sock5Proxy,                          // vm socket5地址
 		Proxy:     "",                // 置空，后续不是1号1ip了
 		Priority:  50,                // priority

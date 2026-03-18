@@ -30,4 +30,6 @@ const (
 	ProxyTypeHttpProxy      = "httpProxyServer"
 	ProxyTypeHttpProxyAlias = "server"
 	ProxyTypeAll            = "all" // 同时支持三种代理类型
+
+	GcpChanId = 16 // 本服务开号流程获取的token放入的其他服务的账号渠道中，渠道id固定是16
 )

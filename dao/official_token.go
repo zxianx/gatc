@@ -3,6 +3,7 @@ package dao
 import (
 	"errors"
 	"fmt"
+	"gatc/constants"
 	"gatc/helpers"
 	"gorm.io/gorm"
 	"time"
@@ -167,6 +168,20 @@ func (c *GormOfficialTokens) Create(ctx *gin.Context) (err error) {
 	err = db.Model(&c).Create(&c).Error
 
 	return
+}
+
+func (c *GormOfficialTokens) DeleteGcpTokenByEmails(ctx *gin.Context, emails []string) (affect int64, err error) {
+	db := c.getDb()
+	if ctx != nil {
+		db = db.WithContext(ctx)
+	}
+	if len(emails) == 0 {
+		return 0, nil
+	}
+	result := db.Where("channel_id = ?", constants.GcpChanId).
+		Where("email IN ?", emails).
+		Delete(&GormOfficialTokens{})
+	return result.RowsAffected, result.Error
 }
 
 // UpdateByPk  更新单条记录推荐， 避免意外参数错误Update批量错误更新

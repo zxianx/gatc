@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"gatc/base/config"
+	"gatc/base/middleware"
 	"gatc/base/zlog"
 	"gatc/constants"
 	"gatc/dao"
@@ -803,6 +804,7 @@ func (s *VMService) BatchCreateVM(c *gin.Context, param *BatchCreateVMParam) (*B
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	pare_ctx_req_id, _ := c.Get(middleware.RequestIDKey)
 	for i := 0; i < param.Num; i++ {
 		wg.Add(1)
 		go func(index int) {
@@ -814,8 +816,13 @@ func (s *VMService) BatchCreateVM(c *gin.Context, param *BatchCreateVMParam) (*B
 				Tag:         param.Tag + "-" + strconv.Itoa(i),
 				ProxyType:   param.ProxyType,
 			}
-
-			vmResult, err := s.CreateVM(c, createParam)
+			ctx := c
+			if pare_ctx_req_id != nil {
+				ctx = c.Copy()
+				newRequestID := fmt.Sprintf("%s_%d", pare_ctx_req_id.(string), index)
+				ctx.Set(middleware.RequestIDKey, newRequestID)
+			}
+			vmResult, err := s.CreateVM(ctx, createParam)
 
 			mu.Lock()
 			if err != nil {

@@ -666,13 +666,14 @@ func (s *VMService) RefreshVMIP(c *gin.Context, param *RefreshVMIPParam) (*Refre
 // GCPVMInstance GCP中的VM实例信息
 type GCPVMInstance struct {
 	// ID          string `json:"id"` // 历史原因，直接按name管理
-	GcpOriId    string `json:"gcpOriId"`
-	Name        string `json:"name"`
-	Zone        string `json:"zone"`
-	MachineType string `json:"machineType"`
-	Status      string `json:"status"`
-	ExternalIP  string `json:"externalIP"`
-	InternalIP  string `json:"internalIP"`
+	GcpOriId          string    `json:"gcpOriId"`
+	Name              string    `json:"name"`
+	Zone              string    `json:"zone"`
+	MachineType       string    `json:"machineType"`
+	Status            string    `json:"status"`
+	ExternalIP        string    `json:"externalIP"`
+	InternalIP        string    `json:"internalIP"`
+	CreationTimestamp time.Time `json:"creationTimestamp"`
 }
 
 // getGCPVMInstances 获取GCP中所有VM实例
@@ -743,6 +744,16 @@ func (s *VMService) getGCPVMInstances(c *gin.Context) ([]GCPVMInstance, error) {
 							instance.ExternalIP = natIP
 						}
 					}
+				}
+			}
+		}
+
+		// 跳过创建小于10分钟的vm，手动输出截取json字段参考 "creationTimestamp": "2026-03-20T06:52:25.108-07:00",
+		if creationTs, ok := raw["creationTimestamp"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, creationTs); err == nil {
+				instance.CreationTimestamp = t
+				if time.Since(t) < 10*time.Minute {
+					continue // 跳过创建小于10分钟的VM
 				}
 			}
 		}
